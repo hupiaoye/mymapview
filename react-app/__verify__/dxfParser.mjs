@@ -19,7 +19,7 @@ const DXF_COLORS = {
 
 // 统一文字字体族（任务2优化）：优先清晰无衬线字体栈，保证中文高程注记与中文注记都细体、清晰。
 // 配合 buildTextStyle 的白色光晕(halo)进一步提高画布对比度与可读性。
-const TEXT_FONT_FAMILY = 'Microsoft YaHei, PingFang SC, Helvetica Neue, Arial, sans-serif';
+const TEXT_FONT_FAMILY = "'Microsoft YaHei Light','Microsoft YaHei UI Light','Microsoft YaHei','PingFang SC','Helvetica Neue',Arial,sans-serif";
 
 // GCD 高程注记样式（本次 Bug 修复）：
 // 高程数值恒定橙红色、细体(normal)、恒定屏幕像素(scale:undefined，不随缩放放大)。
@@ -56,7 +56,7 @@ function buildTextStyle(o) {
     text: o.text,
     font,
     fill: new Fill({ color: o.color || '#000000' }),
-    stroke: new Stroke({ color: o.haloColor || 'white', width: o.haloWidth != null ? o.haloWidth : 2 }),
+    stroke: new Stroke({ color: o.haloColor || 'white', width: o.haloWidth != null ? o.haloWidth : 1.2 }),
     textAlign: o.textAlign || 'center',
     textBaseline: o.textBaseline || 'middle',
     offsetX: o.offsetX || 0,
@@ -492,7 +492,7 @@ const LAYER_STYLE_MAP = {
     type: 'point'
   },
   GCDA: {  // 控制点注记（高程数值）— 文字层！仍用红色，但任务1要求细体（normal、不倾斜）
-    text: { color: '#FF0000', fontSize: 14, fontWeight: 'normal', fontFamily: TEXT_FONT_FAMILY, strokeColor: 'white', strokeWidth: 2.5 },
+    text: { color: '#FF0000', fontSize: 14, fontWeight: 'normal', fontFamily: TEXT_FONT_FAMILY, strokeColor: 'white', strokeWidth: 1.4 },
     type: 'text'
   },
 
@@ -878,6 +878,12 @@ async function parsePOLYLINE(lines, startIndex, sourceCoordSystem, unit, layer, 
 
   if (vertices.length < 2) return { feature: null, nextIndex: i };
 
+  // 本轮修复：去除首尾重合的闭合顶点，避免多段线自动闭合（用户要求不闭合）
+  if (vertices.length >= 2) {
+    const fv = vertices[0], lv = vertices[vertices.length - 1];
+    if (Math.abs(fv[0] - lv[0]) < 1e-9 && Math.abs(fv[1] - lv[1]) < 1e-9) vertices.pop();
+  }
+
   const coords = [];
   for (const v of vertices) {
     const [lon, lat] = await convertToWGS84(v[0], v[1], sourceCoordSystem, unit);
@@ -1127,7 +1133,7 @@ async function parsePOINT(lines, startIndex, sourceCoordSystem, unit, layer, col
       fromZFallback: true
     });
     zFeature.setStyle(new Style({
-      text: buildTextStyle({ text: zText, color: '#FF0000', fontSize: 14, haloColor: 'white', haloWidth: 2.5 })
+      text: buildTextStyle({ text: zText, color: '#FF0000', fontSize: 14, haloColor: 'white', haloWidth: 1.4 })
     }));
     extraFeatures.push(zFeature);
   }
@@ -1412,7 +1418,7 @@ async function tryBuildGcdElevation(blockName, layer, attribs, insX, insY, color
       color: GCD_ELEVATION_COLOR,
       fontSize: GCD_ELEVATION_FONT_SIZE,
       haloColor: 'white',
-      haloWidth: 2.5,
+      haloWidth: 1.4,
       textAlign: 'left',
       offsetX: 6
     })
@@ -1486,12 +1492,11 @@ async function parseINSERT(lines, startIndex, sourceCoordSystem, unit, layer, co
   );
   if (gcdElevationFeature) features.push(gcdElevationFeature);
 
-  // 任务3：若已从高程块(gc200 等)产出 GCD 高程注记，则抑制「随缩放变大的块几何」展开，
-  // 改由 GCD 高程注记(固定像素小圆点 + 橙红数字)表达。此时直接返回，不再生成回退插入点。
-  const suppressBlockGeom = !!gcdElevationFeature;
-  if (suppressBlockGeom) {
-    return { features, nextIndex: i };
-  }
+  // 本轮修复：GCD 高程块(gc200 等)或 GCD 图层的 INSERT 一律抑制「随缩放变大的地图坐标块几何」展开
+  // （圆/线等几何按地图坐标绘制会随缩放变化）。但保留下方 ATTDEF 文字提取（文字恒定像素、不缩放）；
+  // 若既无 ATTRIB height、又无 ATTDEF 文字，则补一个固定像素小橙点，保证高程点可见且不随缩放变化。
+  const isGcdInsert = /^gc\d*$/i.test(blockName || '') || /^(GCD|GCDA)/i.test(layer || '');
+  const skipBlockGeom = isGcdInsert;
 
   // 修复1&3：块参照真正展开为真实几何（始终可见，不受 GCD point.visible:false 影响）
   if (block && block.ents && block.ents.length > 0) {
@@ -1500,6 +1505,8 @@ async function parseINSERT(lines, startIndex, sourceCoordSystem, unit, layer, co
       const type = (ent[0] && ent[0][0] === 0) ? ent[0][1] : '';
       // 跳过多余/嵌套图元，避免死循环与无效展开
       if (!type || type === 'INSERT' || type === 'ATTRIB' || type === 'ATTDEF' || type === 'DIMENSION') continue;
+      // 本轮修复：GCD 高程块仅保留块内文字注记(恒定像素)，跳过随缩放变化的几何(圆/线等)
+      if (skipBlockGeom && type !== 'TEXT' && type !== 'MTEXT') continue;
 
       // 将块内局部坐标变换到世界坐标（圆半径 group40 乘 sx）
       const pairs = ent.map(([c, v]) => [c, v]);

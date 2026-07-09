@@ -96,8 +96,8 @@ export async function runGcdAttribTest() {
   console.log('\n[遗留结构] 总要素数:', total, '| 各图层:', JSON.stringify(byLayer));
   console.log('  text 类文字:', JSON.stringify(texts), '| 块属性文字:', JSON.stringify(attrTexts));
 
-  const legacyOk1 = total === 6;                  // 2 个 GCD INSERT 各(点+属性文字)=4 + GCDA TEXT/MTEXT=2
-  const legacyOk2 = (byLayer['GCD'] || 0) === 4;
+  const legacyOk1 = total === 4;                  // 2 个 GCD INSERT 仅产出属性文字(几何已抑制)=2 + GCDA TEXT/MTEXT=2
+  const legacyOk2 = (byLayer['GCD'] || 0) === 2;
   const legacyOk3 = (byLayer['GCDA'] || 0) === 2;
   const legacyOk4 = texts.includes('33.7');       // INSERT 带 ATTRIB ELEV -> 实例值覆盖默认
   const legacyOk5 = texts.includes('12.5');       // INSERT 不带 ATTRIB -> ATTDEF 默认值兜底
@@ -106,7 +106,7 @@ export async function runGcdAttribTest() {
   const legacyOk = legacyOk1 && legacyOk2 && legacyOk3 && legacyOk4 && legacyOk5 && legacyOk6 && legacyOk7;
 
   console.log(`\n断言[真实]: 注记数===2:${realOkCount}, 7.73坐标/图层:${realOk73}, 12.25坐标/图层:${realOk1225}, 全部有效:${realAllValid}, 几何有限:${realGeomFinite}`);
-  console.log(`断言[遗留]: total===6:${legacyOk1}, GCD===4:${legacyOk2}, GCDA===2:${legacyOk3}, 含33.7:${legacyOk4}, 含12.5:${legacyOk5}, 块属性text===2:${legacyOk6}, 几何有限&样式有效:${legacyOk7}`);
+  console.log(`断言[遗留]: total===4:${legacyOk1}, GCD===2:${legacyOk2}, GCDA===2:${legacyOk3}, 含33.7:${legacyOk4}, 含12.5:${legacyOk5}, 块属性text===2:${legacyOk6}, 几何有限&样式有效:${legacyOk7}`);
 
   const allPass = realOk && legacyOk;
   console.log('\nGCD 验证结论:', allPass ? 'GCD_TEXT_OK' : 'GCD_TEXT_FAIL');

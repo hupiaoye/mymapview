@@ -3,7 +3,7 @@
 //   A. 块名 gcbj（图形/注记块）即使在非 GCD 层带 height ATTRIB，
 //      也不应被主路径误判为 GCD 高程注记（正则 /^gc\d*$/i 必须排除 gcbj）。
 //   B. height 值带单位后缀（如 "7.73m"）仍应生成高程注记，name 保留原始值。
-//   C. height 值为空（""）时不生成高程注记，且不崩溃，块几何仍正常展开。
+//   C. height 值为空（""）时不生成高程注记，且不崩溃，块几何被抑制(不随缩放变化)。
 // 运行：node __verify__/test_gcd_attrib_edge.mjs
 import { resolve, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -138,8 +138,8 @@ export async function runGcdEdgeTest() {
   const c = await parseDXF(buildFixture('gc200', 'GCD', ''), 'wgs84', 'm');
   const cElev = c.features.filter(f => f.get && f.get('isGcdElevation'));
   const cHasBlockGeom = c.features.some(f => f.get('type') === 'dxf_circle' || f.get('fromBlock'));
-  const cOk = cElev.length === 0 && cHasBlockGeom;
-  console.log(`[C] gc200 图层GCD height=(空) -> GCD高程注记数=${cElev.length}(期望0), 块几何展开=${cHasBlockGeom}(不崩溃): ${cOk}`);
+  const cOk = cElev.length === 0 && !cHasBlockGeom;   // 空height：不生成注记，且抑制块几何(不随缩放变化)，不崩溃
+  console.log(`[C] gc200 图层GCD height=(空) -> GCD高程注记数=${cElev.length}(期望0), 块几何抑制=${!cHasBlockGeom}(不崩溃): ${cOk}`);
   allPass = allPass && cOk;
 
   console.log('\nGCD 边界补充结论:', allPass ? 'GCD_EDGE_OK' : 'GCD_EDGE_FAIL');

@@ -56,7 +56,7 @@ for (const f of features) {
   }
 }
 
-const ok1 = features.length === 6;                 // GCDPT(点+文)=2 + *U1(文)=1 + GCDA(文)=1 + POINT(Z 点+文)=2
+const ok1 = features.length === 5;                 // GCDPT(文)=1 + *U1(文)=1 + GCDA(文)=1 + POINT(Z 点+文)=2（GCD 块几何已抑制）
 const ok2 = texts.includes('12.5');                // (a) 命名块 GCDPT 内 TEXT
 const ok3 = texts.includes('33.7');                // (b) 匿名块 *U1 内 TEXT
 const ok4 = texts.includes('45.2');                // (c) GCDA 独立 TEXT
@@ -65,7 +65,7 @@ const ok6 = fromZFallback === 1;                   // 只有 1 个 Z 兜底文�
 const ok7 = geomAllFinite;                         // 几何坐标全部有限
 const ok8 = gcdPointVisible && gcdPointRadius > 0 && gcdPointRadius <= 5; // 独立 GCD point 可见、固定像素(≤5px)
 
-console.log(`断言: total===6:${ok1}, 含12.5(命名块):${ok2}, 含33.7(匿名块*U1):${ok3}, 含45.2(GCDA):${ok4}, 含88.8(Z兜底):${ok5}, Z兜底数===1:${ok6}, 几何有限:${ok7}, 独立GCD点可见(固定像素):${ok8}`);
+console.log(`断言: total===5:${ok1}, 含12.5(命名块):${ok2}, 含33.7(匿名块*U1):${ok3}, 含45.2(GCDA):${ok4}, 含88.8(Z兜底):${ok5}, Z兜底数===1:${ok6}, 几何有限:${ok7}, 独立GCD点可见(固定像素):${ok8}`);
 
 const allPass = ok1 && ok2 && ok3 && ok4 && ok5 && ok6 && ok7 && ok8;
 console.log('\n任务3 验证结论:', allPass ? 'GCD2_OK' : 'GCD2_FAIL');
