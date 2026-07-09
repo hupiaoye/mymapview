@@ -17,14 +17,53 @@ const DXF_COLORS = {
   230: '#FFBF40', 240: '#FFFF40', 250: '#BFFF40',   255: '#000000'
 };
 
-// 统一文字字体族：保证中文高程注记与中文注记都能以细体正常显示（任务1）
-const TEXT_FONT_FAMILY = 'Microsoft YaHei, SimSun, Arial, sans-serif';
+// 统一文字字体族（任务2优化）：优先清晰无衬线字体栈，保证中文高程注记与中文注记都细体、清晰。
+// 配合 buildTextStyle 的白色光晕(halo)进一步提高画布对比度与可读性。
+const TEXT_FONT_FAMILY = 'Microsoft YaHei, PingFang SC, Helvetica Neue, Arial, sans-serif';
 
 // GCD 高程注记样式（本次 Bug 修复）：
 // 高程数值恒定橙红色、细体(normal)、恒定屏幕像素(scale:undefined，不随缩放放大)。
 // 与现有 GCD 点色(#FF6600)同源，取更醒目的橙红；复用 dxf_text 类型与现有样式管线。
 const GCD_ELEVATION_COLOR = '#ff5500';
 const GCD_ELEVATION_FONT_SIZE = 14;
+
+// GCD 高程点（小圆点符号）恒定屏幕像素半径，绝不随地图缩放变大变小（任务3）。
+const GCD_ELEVATION_DOT_RADIUS = 3.5;
+
+/**
+ * 统一文字样式构造器（任务2）：
+ *  - 细字重（normal 或传入更轻字重），提升“细”观感；
+ *  - 固定屏幕像素大小（scale:undefined，OpenLayers Text 不随地图 zoom/resolution 缩放）；
+ *  - 白色光晕(halo)描边，提高复杂底图上的对比与清晰度；
+ *  - 合理设置 textBaseline / textAlign / offset，便于锚定（如高程数字偏右避免压住小圆点）。
+ * @param {Object} o
+ * @param {string} o.text 文字内容
+ * @param {string} o.color 填充色
+ * @param {number} [o.fontSize=12] 字号(px)
+ * @param {string} [o.fontWeight='normal'] 字重
+ * @param {string} [o.fontFamily] 字体族，缺省用 TEXT_FONT_FAMILY
+ * @param {string} [o.haloColor='white'] 光晕色
+ * @param {number} [o.haloWidth=2] 光晕宽度(px)
+ * @param {string} [o.textAlign='center'] 水平对齐
+ * @param {string} [o.textBaseline='middle'] 垂直对齐
+ * @param {number} [o.offsetX=0] 水平偏移(px)
+ * @param {number} [o.offsetY=0] 垂直偏移(px)
+ * @returns {Text}
+ */
+function buildTextStyle(o) {
+  const font = `${o.fontWeight || 'normal'} ${o.fontSize || 12}px ${o.fontFamily || TEXT_FONT_FAMILY}`;
+  return new Text({
+    text: o.text,
+    font,
+    fill: new Fill({ color: o.color || '#000000' }),
+    stroke: new Stroke({ color: o.haloColor || 'white', width: o.haloWidth != null ? o.haloWidth : 2 }),
+    textAlign: o.textAlign || 'center',
+    textBaseline: o.textBaseline || 'middle',
+    offsetX: o.offsetX || 0,
+    offsetY: o.offsetY || 0,
+    scale: undefined // 恒定屏幕像素，不随缩放放大
+  });
+}
 
 // 图层色表（按图层名记录 DXF 图层 ACI 颜色，用于实体 BYLAYER 着色）
 const layerColorMap = {};
@@ -1044,19 +1083,28 @@ async function parsePOINT(lines, startIndex, sourceCoordSystem, unit, layer, col
   
   const lsty = getLayerStyle(layer);
   if (lsty.point && lsty.point.visible === false) {
+    const isGcd = layer === 'GCD' || layer.startsWith('GCD');
     if (fromBlock) {
-      // 块展开得到的要素默认可见：高程点(GCD)用显眼橙红小点，其余用中性灰点。
-      // 仅“块找不到时的回退插入点 Point”才沿用 visible:false 隐藏逻辑。
-      const isGcd = layer === 'GCD' || layer.startsWith('GCD');
+      // 块展开得到的要素默认可见：高程点(GCD)用显眼橙红小点（固定屏幕像素），其余用中性灰点。
       feature.setStyle(new Style({
         image: new CircleStyle({
-          radius: isGcd ? 3 : 2,
-          fill: new Fill({ color: isGcd ? '#FF6600' : '#888888' }),
+          radius: isGcd ? GCD_ELEVATION_DOT_RADIUS : 2,
+          fill: new Fill({ color: isGcd ? GCD_ELEVATION_COLOR : '#888888' }),
+          stroke: new Stroke({ color: 'white', width: 1 })
+        })
+      }));
+    } else if (isGcd) {
+      // 任务3：独立 GCD 高程点（非块展开，如直接导入的 GCD POINT）——渲染为固定屏幕大小的小圆点，
+      // 恒定像素(3.5px)，绝不随地图缩放变大变小，与 GCD 高程注记(数字)配套显示。
+      feature.setStyle(new Style({
+        image: new CircleStyle({
+          radius: GCD_ELEVATION_DOT_RADIUS,
+          fill: new Fill({ color: GCD_ELEVATION_COLOR }),
           stroke: new Stroke({ color: 'white', width: 1 })
         })
       }));
     } else {
-      feature.setStyle(null); // 隐藏该类点（如直接导入的 COMPONENT / GCD 海量高程点）
+      feature.setStyle(null); // 其它隐藏点层（如 COMPONENT）保持隐藏
     }
   } else if (lsty.type === 'point' && lsty.point) {
     const p = lsty.point;
@@ -1088,13 +1136,7 @@ async function parsePOINT(lines, startIndex, sourceCoordSystem, unit, layer, col
       fromZFallback: true
     });
     zFeature.setStyle(new Style({
-      text: new Text({
-        text: zText,
-        font: `normal 14px ${TEXT_FONT_FAMILY}`,
-        fill: new Fill({ color: '#FF0000' }),   // 高程数字用红色，醒目
-        stroke: new Stroke({ color: 'white', width: 2.5 }),
-        scale: undefined
-      })
+      text: buildTextStyle({ text: zText, color: '#FF0000', fontSize: 14, haloColor: 'white', haloWidth: 2.5 })
     }));
     extraFeatures.push(zFeature);
   }
@@ -1142,34 +1184,30 @@ async function parseTEXT(lines, startIndex, sourceCoordSystem, unit, layer, colo
     srcCoords: [[x, y]]
   });
 
-  // 图层感知：优先使用图层专属文字样式（如 GCDA 高程注记、文字注记层），否则回退到 DXF ACI 色号逻辑
+  // 图层感知：优先使用图层专属文字样式（如 GCDA 高程注记、文字注记层），否则回退到 DXF ACI 色号逻辑。
+  // 任务2：统一通过 buildTextStyle 渲染——细体 + 白色光晕 + 固定屏幕像素，清晰可读。
   const lsty = getLayerStyle(layer);
-  let textFill, textFont, textStroke;
-
+  let textStyle;
   if (lsty.text) {
-    // 图层有专用文字样式定义 → 使用（任务1：统一细体 normal + 统一字体族）
-    textFill = new Fill({ color: lsty.text.color || '#000000' });
-    textFont = `normal ${lsty.text.fontSize || 12}px ${TEXT_FONT_FAMILY}`;
-    textStroke = lsty.text.strokeColor ? new Stroke({ color: lsty.text.strokeColor, width: lsty.text.strokeWidth || 2 }) : undefined;
+    textStyle = buildTextStyle({
+      text: displayText,
+      color: lsty.text.color || '#000000',
+      fontSize: lsty.text.fontSize || 12,
+      haloColor: lsty.text.strokeColor || 'white',
+      haloWidth: lsty.text.strokeWidth || 2
+    });
   } else {
-    // 无专用定义 → 回退到 DXF 颜色逻辑（任务1：统一细体 normal + 统一字体族）
     const dxfColor = resolveDxfColor(layer, colorIndex, trueColor);
-    textFill = new Fill({ color: dxfColor || getColorStyle(colorIndex) });
-    textFont = `normal 12px ${TEXT_FONT_FAMILY}`;
-    textStroke = new Stroke({ color: 'white', width: 3 });
+    textStyle = buildTextStyle({
+      text: displayText,
+      color: dxfColor || getColorStyle(colorIndex),
+      fontSize: 12,
+      haloColor: 'white',
+      haloWidth: 2
+    });
   }
 
-  feature.setStyle(new Style({
-    text: new Text({
-      text: displayText,
-      font: textFont,
-      fill: textFill,
-      stroke: textStroke,
-      // 任务2：ol/style/Text 默认即固定屏幕像素大小（不随地图 zoom/resolution 变化）；
-      // 显式置 undefined，杜绝任何与缩放相关的缩放值，保证文字“实际大小即显示大小”。
-      scale: undefined
-    })
-  }));
+  feature.setStyle(new Style({ text: textStyle }));
 
   return { feature, nextIndex: i };
 }
@@ -1367,13 +1405,25 @@ async function tryBuildGcdElevation(blockName, layer, attribs, insX, insY, color
     fontSize: GCD_ELEVATION_FONT_SIZE
   });
 
+  // 任务3：GCD 高程点渲染为「小尺寸固定屏幕大小的符号(恒定像素小圆点) + 橙红高程数字」。
+  //  - 小圆点：CircleStyle 半径恒为像素(3.5px)，绝不随地图缩放变大变小（画布点符号固定像素）；
+  //  - 数字：buildTextStyle 固定屏幕像素(scale:undefined) + 白色光晕，细体橙红、清晰；
+  //    数字偏右(offsetX)以免压在小圆点上，更接近 CAD 高程点样式。
+  const gcdImage = new CircleStyle({
+    radius: GCD_ELEVATION_DOT_RADIUS,
+    fill: new Fill({ color: GCD_ELEVATION_COLOR }),
+    stroke: new Stroke({ color: 'white', width: 1 })
+  });
   feat.setStyle(new Style({
-    text: new Text({
+    image: gcdImage,
+    text: buildTextStyle({
       text: heightVal,
-      font: `normal ${GCD_ELEVATION_FONT_SIZE}px ${TEXT_FONT_FAMILY}`,
-      fill: new Fill({ color: GCD_ELEVATION_COLOR }),
-      stroke: new Stroke({ color: 'white', width: 2.5 }),
-      scale: undefined // 恒定屏幕像素，不随缩放放大
+      color: GCD_ELEVATION_COLOR,
+      fontSize: GCD_ELEVATION_FONT_SIZE,
+      haloColor: 'white',
+      haloWidth: 2.5,
+      textAlign: 'left',
+      offsetX: 6
     })
   }));
 
@@ -1444,6 +1494,13 @@ async function parseINSERT(lines, startIndex, sourceCoordSystem, unit, layer, co
     blockName, layer, attribs, x, y, colorIndex, sourceCoordSystem, unit
   );
   if (gcdElevationFeature) features.push(gcdElevationFeature);
+
+  // 任务3：若已从高程块(gc200 等)产出 GCD 高程注记，则抑制「随缩放变大的块几何」展开，
+  // 改由 GCD 高程注记(固定像素小圆点 + 橙红数字)表达。此时直接返回，不再生成回退插入点。
+  const suppressBlockGeom = !!gcdElevationFeature;
+  if (suppressBlockGeom) {
+    return { features, nextIndex: i };
+  }
 
   // 修复1&3：块参照真正展开为真实几何（始终可见，不受 GCD point.visible:false 影响）
   if (block && block.ents && block.ents.length > 0) {
@@ -1659,18 +1716,30 @@ export function applyFeatureStyle(feature) {
     const tColor = overrideColor || (lsty.text ? lsty.text.color : (resolved || '#000000'));
     const fontSize = feature.get('fontSize') || (lsty.text ? lsty.text.fontSize : 12);
     const t = feature.get('name') || '';
-    feature.setStyle(new Style({
-      text: new Text({
-        text: t,
-        font: `normal ${fontSize}px ${TEXT_FONT_FAMILY}`,
-        fill: new Fill({ color: tColor }),
-        stroke: new Stroke({
-          color: lsty.text ? (lsty.text.strokeColor || 'white') : 'white',
-          width: lsty.text ? (lsty.text.strokeWidth || 2) : 2
-        }),
-        scale: undefined   // 任务2：文字恒定屏幕像素大小
-      })
-    }));
+    const haloColor = lsty.text ? (lsty.text.strokeColor || 'white') : 'white';
+    const haloWidth = lsty.text ? (lsty.text.strokeWidth || 2) : 2;
+    const isGcdElev = feature.get('isGcdElevation');
+    // GCD 高程注记：数字偏右(offsetX)以免压在小圆点上，保持细体橙红、固定屏幕像素
+    const textStyle = buildTextStyle({
+      text: t,
+      color: tColor,
+      fontSize,
+      haloColor,
+      haloWidth,
+      textAlign: isGcdElev ? 'left' : 'center',
+      offsetX: isGcdElev ? 6 : 0
+    });
+    const styleOpts = { text: textStyle };
+    // 任务3：GCD 高程点附带固定屏幕像素小圆点（不随缩放变化），颜色跟随编辑后的覆盖色
+    if (isGcdElev) {
+      const dotColor = overrideColor || GCD_ELEVATION_COLOR;
+      styleOpts.image = new CircleStyle({
+        radius: GCD_ELEVATION_DOT_RADIUS,
+        fill: new Fill({ color: dotColor }),
+        stroke: new Stroke({ color: 'white', width: 1 })
+      });
+    }
+    feature.setStyle(new Style(styleOpts));
     return;
   }
 

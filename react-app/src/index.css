@@ -165,6 +165,9 @@ body { font-family: 'Microsoft YaHei', Arial, sans-serif; font-size: 12px; overf
 /* 表单 */
 .form-row { display: flex; align-items: center; margin-bottom: 8px; gap: 8px; }
 .form-row label { width: 60px; text-align: right; font-size: 12px; }
+/* 属性面板中只读信息（图层/类型/块派生等）：弱化视觉，明确不可编辑 */
+.form-row.readonly label { color: #999; }
+.form-row.readonly span { color: #555; font-weight: 600; }
 .form-row input, .form-row select, .form-row textarea {
   flex: 1;
   padding: 6px 8px;

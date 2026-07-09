@@ -253,29 +253,31 @@ function App() {
     });
   }, [selectedFeature]);
 
-  // 任务4：把属性面板编辑写回 OL 要素（重建样式 / 重投影几何），地图即时刷新
-  const applyFeatureEdit = async () => {
+  // 任务①/④：把属性面板编辑写回 OL 要素（重建样式 / 重投影几何），地图即时刷新。
+  // 支持传入 formOverride（实时编辑场景），缺省使用当前 editForm 快照。
+  const applyFeatureEdit = async (formOverride) => {
     const f = selectedFeature;
     if (!f) return;
+    const form = formOverride || editForm;
     const type = f.get('type') || '';
     const isPoint = type === 'dxf_point' || type === 'dxf_block';
     const isText = type === 'dxf_text';
 
     if (isText) {
-      f.set('name', editForm.name);
-      f.set('fontSize', parseFloat(editForm.fontSize) || 12);
+      f.set('name', form.name);
+      f.set('fontSize', parseFloat(form.fontSize) || 12);
     }
-    f.set('colorOverride', editForm.color);
-    if (isPoint) f.set('pointRadius', parseFloat(editForm.radius) || 3);
-    else f.set('lineWidth', parseFloat(editForm.lineWidth) || 1);
+    f.set('colorOverride', form.color);
+    if (isPoint) f.set('pointRadius', parseFloat(form.radius) || 3);
+    else f.set('lineWidth', parseFloat(form.lineWidth) || 1);
 
     // 点坐标编辑：经源坐标系重投影更新几何。
     // 几何已随当前底图基准面物理偏移（datum 记录当前显示基准面），编辑后需先重投影到 WGS84，
     // 再叠加同一基准面偏移写回，保持与同图层其它要素一致——避免跳回 WGS84 造成错位，
     // 也避免 datum 仍为 gcj02 而几何是 WGS84 导致后续切底图时二次偏移、误差累积。
     if (isPoint) {
-      const sx = parseFloat(editForm.x);
-      const sy = parseFloat(editForm.y);
+      const sx = parseFloat(form.x);
+      const sy = parseFloat(form.y);
       if (isFinite(sx) && isFinite(sy)) {
         const srcSystem = f.get('srcSystem') || 'wgs84';
         const curDatum = f.get('datum') || 'wgs84';
@@ -288,6 +290,17 @@ function App() {
     }
 
     applyFeatureStyle(f);   // 据最新属性重建样式，地图即时刷新
+  };
+
+  // 任务①：属性编辑实时生效（类似 CAD 改属性）。非坐标字段随输入即时应用；
+  // 坐标 X/Y 在失焦(blur)时应用，避免输入中途(如 "113.")触发几何重投影跳变。
+  const applyField = (patch) => {
+    const next = { ...editForm, ...patch };
+    setEditForm(next);
+    applyFeatureEdit(next);
+  };
+  const applyCoordEdit = () => {
+    applyFeatureEdit();
   };
 
   // 初始化地图
@@ -329,6 +342,7 @@ function App() {
       map.forEachFeatureAtPixel(e.pixel, (f) => { hit = f; return true; }, { hitTolerance: 5 });
       if (hit && !hit.get('markerData')) {
         setSelectedFeature(hit);   // 命中 DXF 要素 -> 选中
+        setRightTab('props');      // 任务①：选中要素后自动切到「属性」面板，与列表点击行为一致、可编辑
       } else {
         setSelectedFeature(null);  // 命中标注或空白 -> 清空选中
         if (!hit) {
@@ -696,6 +710,7 @@ function App() {
   const selectAndLocate = (f) => {
     if (!f) return;
     setSelectedFeature(f);  // 联动右侧属性面板
+    setRightTab('props');   // 任务①：从图层展开列表点击元素 -> 自动打开可编辑「属性」面板
     const map = mapRef2.current;
     if (!map) return;
     try {
@@ -1056,44 +1071,44 @@ function App() {
                   const attTag = selectedFeature.get('attTag');
                   return (
                     <div style={{ padding: 10 }}>
-                      <div className="form-row"><label>图层:</label><span>{selectedFeature.get('layer')}</span></div>
-                      <div className="form-row"><label>类型:</label><span>{type}</span></div>
+                      <div className="form-row readonly"><label>图层:</label><span>{selectedFeature.get('layer')}</span></div>
+                      <div className="form-row readonly"><label>类型:</label><span>{type}</span></div>
 
                       {isText && (
                         <>
                           <div className="form-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
                             <label>文字内容:</label>
-                            <input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} style={{ marginTop: 4 }} />
+                            <input value={editForm.name} onChange={(e) => applyField({ name: e.target.value })} style={{ marginTop: 4 }} />
                           </div>
                           <div className="form-row"><label>字号:</label>
-                            <input type="number" value={editForm.fontSize} onChange={(e) => setEditForm({ ...editForm, fontSize: e.target.value })} style={{ width: 80 }} />
+                            <input type="number" value={editForm.fontSize} onChange={(e) => applyField({ fontSize: e.target.value })} style={{ width: 80 }} />
                           </div>
                         </>
                       )}
 
                       {isPoint && (
                         <>
-                          <div className="form-row"><label>源X:</label><input value={editForm.x} onChange={(e) => setEditForm({ ...editForm, x: e.target.value })} style={{ width: 100 }} /></div>
-                          <div className="form-row"><label>源Y:</label><input value={editForm.y} onChange={(e) => setEditForm({ ...editForm, y: e.target.value })} style={{ width: 100 }} /></div>
-                          <div className="form-row"><label>点半径:</label><input type="number" value={editForm.radius} onChange={(e) => setEditForm({ ...editForm, radius: e.target.value })} style={{ width: 80 }} /></div>
+                          <div className="form-row"><label>源X:</label><input value={editForm.x} onChange={(e) => setEditForm({ ...editForm, x: e.target.value })} onBlur={applyCoordEdit} style={{ width: 100 }} /></div>
+                          <div className="form-row"><label>源Y:</label><input value={editForm.y} onChange={(e) => setEditForm({ ...editForm, y: e.target.value })} onBlur={applyCoordEdit} style={{ width: 100 }} /></div>
+                          <div className="form-row"><label>点半径:</label><input type="number" value={editForm.radius} onChange={(e) => applyField({ radius: e.target.value })} style={{ width: 80 }} /></div>
                         </>
                       )}
 
                       {(isLine || isPolygon) && (
-                        <div className="form-row"><label>线宽:</label><input type="number" value={editForm.lineWidth} onChange={(e) => setEditForm({ ...editForm, lineWidth: e.target.value })} style={{ width: 80 }} /></div>
+                        <div className="form-row"><label>线宽:</label><input type="number" value={editForm.lineWidth} onChange={(e) => applyField({ lineWidth: e.target.value })} style={{ width: 80 }} /></div>
                       )}
 
                       <div className="form-row"><label>颜色:</label>
-                        <input type="color" value={editForm.color} onChange={(e) => setEditForm({ ...editForm, color: e.target.value })} />
+                        <input type="color" value={editForm.color} onChange={(e) => applyField({ color: e.target.value })} />
                       </div>
 
-                      {fromBlock && <div className="form-row"><label>块派生:</label><span>是</span></div>}
+                      {fromBlock && <div className="form-row readonly"><label>块派生:</label><span>是</span></div>}
                       {fromAttrib && (
-                        <div className="form-row"><label>属性标签:</label><span>{attTag || '-'}</span></div>
+                        <div className="form-row readonly"><label>属性标签:</label><span>{attTag || '-'}</span></div>
                       )}
 
                       <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
-                        <button className="btn-primary" onClick={applyFeatureEdit}>应用</button>
+                        <button className="btn-primary" onClick={() => applyFeatureEdit()}>应用</button>
                         <button className="btn" onClick={() => setSelectedFeature(null)}>关闭</button>
                       </div>
                     </div>
