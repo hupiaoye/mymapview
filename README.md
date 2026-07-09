@@ -1,123 +1,103 @@
-# 我的地图 - 轻量级地图查看软件
+# 广勘智图 (my-map-viewer)
 
-基于 Electron + React + OpenLayers 的个人地图查看工具，支持多地图源、多格式数据导入导出。
+桌面端地形图 / DXF 浏览与编辑工具，基于 **Electron + React + OpenLayers + proj4** 构建。
+面向测绘、勘察、规划设计场景，支持导入常见矢量格式、按真实结构解析高程点（GCD）、
+图层化浏览与要素编辑、多底图叠加与坐标系纠偏。
 
-## 功能特点
+---
 
-### 地图源支持
-- 高德地图（标准/卫星）
-- 天地图
-- OpenStreetMap
-- 百度地图
-- 卫星影像
+## ✨ 功能特性
 
-### 数据格式支持
-- **导入**: KML/KMZ, GPX, CSV/Excel, GeoJSON, Shapefile, DXF/DWG
-- **导出**: KML, GPX, GeoJSON, CSV
+- **多格式导入**：DXF（R2000 ASCII，GBK/GB18030）、KML、GPX、GeoJSON、Shapefile、CSV 等
+- **DXF 精细化渲染**
+  - 块参照（INSERT）展开为可见几何
+  - 二维多段线炸开为独立线段（永不误闭合）
+  - 文字统一细体、恒定屏幕像素（不随缩放放大）
+- **GCD 高程点显示**：按真实结构解析 —— 高程数值来自 `INSERT(gc200)` 实体段携带的
+  `ATTRIB(tag="height")`，在插入点生成橙红色恒定像素高程注记
+- **图层管理**
+  - 按图层显隐
+  - 图层下展开元素列表（点 / 线 / 面 / 文字），点击元素即选中并地图定位高亮
+- **要素编辑**：选中后在线编辑属性（文字内容 / 字号 / 坐标 X,Y / 半径 / 线宽 / 颜色）
+- **多底图与纠偏**
+  - 天地图（WGS84）、高德（自动叠加 GCJ-02 火星坐标系纠偏）、卫星等
+  - 缩放放大至 20 级（源无瓦片时标量 overzoom）
+- **坐标系转换**：本地工程坐标 ↔ WGS84（`tmerc` / `proj4`）互转，支持自定义坐标系
 
-### 工具功能
-- 坐标转换（WGS84/GCJ02/BD09）
-- 面积测量
-- 距离测量
-- 标注管理
-- 图层管理
+---
 
-## 安装与运行
+## 🧱 技术栈
 
-### 环境要求
-- Node.js >= 16
-- npm 或 yarn
+| 层 | 技术 |
+|----|------|
+| 运行时 | Electron 28 |
+| 前端 | React 18（react-scripts 5） |
+| 地图 | OpenLayers |
+| 坐标 | proj4 |
 
-### 安装步骤
+---
+
+## 🚀 安装与运行
 
 ```bash
-# 1. 进入项目目录
+# 1. 克隆
+git clone https://github.com/hupiaoye/mymapview.git
 cd my-map-viewer
 
-# 2. 安装主进程依赖
+# 2. 安装依赖（根 + 前端）
 npm install
+cd react-app && npm install && cd ..
 
-# 3. 安装React应用依赖
-cd react-app
-npm install
-cd ..
-
-# 4. 启动开发模式
+# 3. 开发模式（同时起 Electron 与 React 热更新）
 npm start
 ```
 
-### 构建Windows安装包
+---
+
+## 📦 打包（Windows）
 
 ```bash
-# 构建生产版本
 npm run build:win
+# 产物：dist/广勘智图 Setup 1.0.0.exe
 ```
 
-## 项目结构
+> 国内网络建议使用 npmmirror 镜像，避免 Electron 二进制下载超时：
+> ```bash
+> set ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/
+> set ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/
+> ```
+
+---
+
+## 📁 目录结构
 
 ```
 my-map-viewer/
-├── electron/               # Electron主进程
-│   └── main.js
-├── react-app/             # React应用
-│   ├── public/
+├── electron/                 # Electron 主进程
+├── react-app/
 │   ├── src/
-│   │   ├── components/    # React组件
-│   │   ├── utils/         # 工具函数
-│   │   │   ├── coordConvert.js  # 坐标转换
-│   │   │   ├── kmlParser.js     # KML解析
-│   │   │   ├── gpxParser.js     # GPX解析
-│   │   │   ├── csvParser.js     # CSV/Excel解析
-│   │   │   ├── geojsonParser.js # GeoJSON解析
-│   │   │   ├── shapefileParser.js # Shapefile解析
-│   │   │   └── dxfParser.js     # DXF解析
-│   │   ├── App.js
-│   │   └── index.js
-│   └── package.json
-├── assets/                # 应用资源
-├── package.json
-└── README.md
+│   │   ├── App.js            # 主界面、图层树、属性面板、地图交互
+│   │   ├── components/       # 工具栏、侧栏、各类面板
+│   │   └── utils/
+│   │       ├── dxfParser.js  # DXF 解析（含 GCD 高程、块展开、炸开）
+│   │       ├── coordSystems.js
+│   │       └── ...
+│   └── __verify__/           # 解析器单元测试与 DXF 夹具
+├── assets/                   # 资源
+├── docs/                     # 需求 / 分析文档
+├── scripts/                  # 辅助脚本
+└── package.json
 ```
 
-## 使用说明
+---
 
-### 导入数据
-1. 点击工具栏的"导入"按钮，或使用快捷键 Ctrl+O
-2. 选择要导入的文件（支持多选）
-3. 数据将自动显示在地图上
+## 📝 说明
 
-### 添加标注
-1. 直接在地图上点击即可添加标注点
-2. 标注会显示在右侧标注列表中
-3. 可以定位或删除标注
+- `node_modules/`、`dist/`、`react-app/build/`、`*.log` 等已写入 `.gitignore`，不纳入版本库。
+- 仓库仅包含源码与配置，安装依赖后本地体积约 1.x GB，属正常。
 
-### 坐标转换
-1. 点击工具栏的"坐标转换"按钮
-2. 选择源坐标系和目标坐标系
-3. 输入经纬度，点击"转换"
+---
 
-### 测量工具
-1. 点击"面积测量"或"距离测量"按钮
-2. 在地图上绘制图形
-3. 完成后显示测量结果
+## 📄 License
 
-## 自定义配置
-
-### 添加自定义坐标系
-编辑 `react-app/src/utils/coordConvert.js` 中的 `CUSTOM_COORD_SYSTEMS` 对象。
-
-### 修改地图源
-编辑 `react-app/src/App.js` 中的 `MAP_SOURCES` 对象。
-
-## 待实现功能
-
-- [ ] 地理编码搜索
-- [ ] 离线地图下载
-- [ ] 数据同步功能
-- [ ] 导出为PDF/图片
-- [ ] 批量坐标转换
-- [ ] 自定义样式配置
-
-## 许可证
-
-MIT License
+详见仓库 License 设置（默认保留所有权利，如需开源请自行添加 LICENSE）。
