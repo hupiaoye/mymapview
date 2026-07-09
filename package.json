@@ -1,0 +1,41 @@
+{
+  "name": "guangkan-zhitu",
+  "version": "1.0.0",
+  "description": "广勘智图 - 专业测绘看图软件",
+  "author": "胡飘野",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "concurrently \"npm run dev:electron\" \"npm run dev:react\"",
+    "dev:react": "cd react-app & npm start",
+    "dev:electron": "wait-on http://localhost:3000 & electron .",
+    "build": "cd react-app & npm run build",
+    "build:win": "npm run build & electron-builder --win",
+    "install:all": "npm install & cd react-app & npm install"
+  },
+  "dependencies": {
+    "electron-store": "^8.1.0",
+    "@turf/turf": "^6.5.0"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.0",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.6.0",
+    "wait-on": "^7.0.0"
+  },
+  "build": {
+    "appId": "com.guangkan.zhitu",
+    "productName": "广勘智图",
+    "copyright": "Copyright © 2024 胡飘野",
+    "win": {
+      "target": "nsis"
+    },
+    "files": [
+      "electron/**/*",
+      "assets/**/*",
+      "react-app/build/**/*"
+    ],
+    "directories": {
+      "output": "dist"
+    }
+  }
+}
