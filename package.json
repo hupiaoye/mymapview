@@ -13,8 +13,7 @@
     "install:all": "npm install & cd react-app & npm install"
   },
   "dependencies": {
-    "electron-store": "^8.1.0",
-    "@turf/turf": "^6.5.0"
+    "electron-store": "^8.1.0"
   },
   "devDependencies": {
     "concurrently": "^8.2.0",
@@ -26,6 +25,7 @@
     "appId": "com.guangkan.zhitu",
     "productName": "广勘智图",
     "copyright": "Copyright © 2024 胡飘野",
+    "compression": "maximum",
     "win": {
       "target": "nsis"
     },

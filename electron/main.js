@@ -4,6 +4,19 @@ const fs = require('fs');
 
 let mainWindow;
 
+// 单实例锁：避免重复启动多个实例
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+}
+
 function createWindow() {
   // 图标路径
   const iconPath = path.join(__dirname, '../assets/icon.png');
@@ -22,8 +35,10 @@ function createWindow() {
     }
   });
 
-  // 打开DevTools用于调试
-  mainWindow.webContents.openDevTools();
+  // 仅开发环境打开 DevTools（生产环境不弹调试面板）
+  if (process.env.NODE_ENV === 'development') {
+    mainWindow.webContents.openDevTools();
+  }
 
   // 开发环境加载本地服务器，生产环境加载构建文件
   if (process.env.NODE_ENV === 'development') {
@@ -86,7 +101,13 @@ async function importData() {
 
   if (!result.canceled && result.filePaths.length > 0) {
     const files = result.filePaths.map(filePath => {
-      const buffer = fs.readFileSync(filePath);
+      let buffer;
+      try {
+        buffer = fs.readFileSync(filePath);
+      } catch (e) {
+        console.error('读取文件失败:', filePath, e.message);
+        return null;
+      }
       const ext = path.extname(filePath).toLowerCase().replace('.', '');
       
       // DXF/DWG必须作为ArrayBuffer传递，由解析器处理编码
@@ -116,8 +137,10 @@ async function importData() {
         content: content,
         isBinary: isBinary
       };
-    });
-    mainWindow.webContents.send('import-data', files);
+    }).filter(Boolean);
+    if (files.length > 0) {
+      mainWindow.webContents.send('import-data', files);
+    }
   }
 }
 
@@ -156,12 +179,22 @@ ipcMain.handle('import-data', async (event) => {
 });
 
 ipcMain.handle('read-file', async (event, filePath) => {
-  return fs.readFileSync(filePath, 'utf-8');
+  try {
+    return fs.readFileSync(filePath, 'utf-8');
+  } catch (e) {
+    console.error('read-file 失败:', e.message);
+    throw e;
+  }
 });
 
 ipcMain.handle('write-file', async (event, filePath, content) => {
-  fs.writeFileSync(filePath, content, 'utf-8');
-  return true;
+  try {
+    fs.writeFileSync(filePath, content, 'utf-8');
+    return true;
+  } catch (e) {
+    console.error('write-file 失败:', e.message);
+    throw e;
+  }
 });
 
 app.whenReady().then(createWindow);

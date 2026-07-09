@@ -117,16 +117,13 @@ export async function parseDXF(content, sourceCoordSystem = 'wgs84', unit = null
     }
 
     const lines = text.split(/\r?\n/);
-    console.log('DXF文件行数:', lines.length);
     
     // 第一遍：解析图层信息
     parseLayers(lines, layers);
-    console.log('解析到的图层:', Object.keys(layers).length, '个');
     
     // 解析BLOCKS段，获取图块定义
     const blocks = {};
     parseBlocks(lines, blocks);
-    console.log('解析到的图块:', Object.keys(blocks).length, '个');
     
     // 第二遍：解析实体
     let inEntities = false;
@@ -146,7 +143,6 @@ export async function parseDXF(content, sourceCoordSystem = 'wgs84', unit = null
       
       if (inEntities) {
         if (line === 'ENDSEC') {
-          console.log('实体解析完成，共解析', entityCount, '个实体');
           break;
         }
         
@@ -448,23 +444,18 @@ async function convertToWGS84(x, y, sourceSystem, unit = 'm') {
     realY = y / 1000;
   }
   
-  console.log('convertToWGS84:', x, y, sourceSystem, '->', realX, realY);
   
   const sys = COORD_SYSTEMS[sourceSystem];
   if (!sys) {
-    console.log('未找到坐标系:', sourceSystem);
     return [realX, realY];
   }
   
-  console.log('坐标系类型:', sys.type);
   
   const isProjected = sys.type === 'projected' || sys.type === 'local' || sys.type === 'military';
   
   if (isProjected) {
     try {
-      console.log('开始投影转换...');
       const result = await convertCoordinate(realX, realY, sourceSystem, 'wgs84');
-      console.log('转换结果:', result);
       return result;
     } catch (e) {
       console.error('投影转换失败:', e);

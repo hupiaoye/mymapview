@@ -406,11 +406,9 @@ function App() {
     const { ipcRenderer } = window.require('electron');
 
     const handleImportData = (event, files) => {
-      console.log('收到导入数据:', files.length, '个文件');
       if (files && files.length > 0) {
         // 从localStorage读取最新的坐标系设置
         const currentCoordSys = localStorage.getItem('globalCoordSys') || 'wgs84';
-        console.log('当前坐标系设置:', currentCoordSys);
         
         // 检查是否需要坐标系选择器
         const needPicker = files.some(f => ['dxf', 'dwg', 'shp', 'csv', 'xlsx'].includes(f.name.split('.').pop().toLowerCase()));
@@ -458,32 +456,27 @@ function App() {
       const minY = parseFloat(extMinYMatch[1]);
       const maxY = parseFloat(extMaxYMatch[1]);
       
-      console.log('DXF坐标范围: X=', minX, '-', maxX, 'Y=', minY, '-', maxY);
       
       // 广州2000坐标系特征：X是5位数，Y是6位数
       // X范围通常在0-100000之间
       // Y范围通常在-3000000到0之间
       if (minX >= 0 && maxX < 100000 && minY < 0 && maxY < 0) {
-        console.log('检测到广州2000坐标系');
         return 'guangzhou2000';
       }
       
       // UTM坐标系特征：X和Y都是6位数以上
       if (minX > 100000 && minY > 1000000) {
-        console.log('检测到UTM坐标系');
         return 'utm_50n';
       }
       
       // WGS84坐标系特征：X是经度（-180到180），Y是纬度（-90到90）
       if (minX >= -180 && maxX <= 180 && minY >= -90 && maxY <= 90) {
-        console.log('检测到WGS84坐标系');
         return 'wgs84';
       }
     }
     
     // 未匹配任何已知预设：识别为「本地工程坐标（假原点）」，交由用户配置
     // 中央子午线/假东/北偏移，避免强行套用固定假原点的广州2000 导致位置错误
-    console.log('未匹配预设坐标系，识别为本地工程坐标（local_engineering）');
     return 'local_engineering';
   };
 
@@ -505,9 +498,7 @@ function App() {
         const autoDetect = !cs || cs === 'auto';
         if (['dxf', 'dwg'].includes(ext) && autoDetect) {
           coordSys = detectDXFCoordSystem(content);
-          console.log('自动检测坐标系:', coordSys);
         } else {
-          console.log('使用用户选择的坐标系:', coordSys);
         }
 
         // 处理三度带坐标系
@@ -516,7 +507,6 @@ function App() {
           const parts = coordSys.split('_');
           const zone = parseInt(parts[2]);
           const lon = zone * 3;
-          console.log('三度带坐标系:', zone, '带, 中央子午线:', lon, '°');
         }
 
         let feats = [];
@@ -565,14 +555,12 @@ function App() {
               fileBase,
             }));
             setLayers(prev => [...prev, ...subLayers]);
-            console.log('DXF 按图层拆分:', subLayers.map(s => s.name).join(', '));
           } else {
             // 其他格式：整体作为 1 条图层条目
             setLayers(prev => [...prev, { id: Date.now(), name: f.name, visible: true, features: feats }]);
           }
 
           setGlobalCoordSys(coordSys); // 更新全局坐标系
-          console.log('导入成功:', f.name, feats.length, '个要素, 坐标系:', coordSys);
         } else {
           console.warn('没有解析到要素:', f.name);
         }
@@ -589,7 +577,6 @@ function App() {
     if (pendingFiles.length > 0) {
       // 如果选择了"使用系统设置坐标系"，则使用customCoord.coordType
       const coordSys = selectedCoordSys === 'system' ? customCoord.coordType : selectedCoordSys;
-      console.log('使用坐标系:', coordSys, '单位:', importUnit);
       doImport(pendingFiles, coordSys, importUnit);
       setPendingFiles([]);
     }
@@ -631,7 +618,6 @@ function App() {
       duration: 1000
     });
     
-    console.log('缩放到全部要素:', features.length, '个要素');
   };
 
   // 触发导入

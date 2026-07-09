@@ -306,7 +306,6 @@ export function transformFixed(x, y, params) {
  * 坐标转换（使用proj4）
  */
 export async function convertCoordinate(x, y, fromSystemId, toSystemId) {
-  console.log('convertCoordinate调用:', x, y, fromSystemId, '->', toSystemId);
 
   // WGS84/GCJ02/BD09 之间的偏移算法
   if (['wgs84', 'gcj02', 'bd09'].includes(fromSystemId) &&
@@ -336,7 +335,6 @@ export async function convertCoordinate(x, y, fromSystemId, toSystemId) {
   const toName = 'to_' + toSystemId;
   proj4.default.defs(fromName, fromDef);
   proj4.default.defs(toName, toDef);
-  console.log('开始转换:', fromName, '->', toName);
   return proj4.default(fromName, toName, [x, y]);
 }
 
