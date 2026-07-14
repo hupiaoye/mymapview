@@ -1,0 +1,14 @@
+# 构建中间产物
+bin/
+obj/
+publish/
+
+# 嵌入/复制的 React 构建产物(可从 ../my-map-viewer/react-app/build 重建)
+webroot/
+
+# IDE
+.vs/
+*.user
+
+# 运行日志
+*.log

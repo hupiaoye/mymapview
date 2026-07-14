@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <AssemblyName>GkMapWinForms</AssemblyName>
+    <RootNamespace>GkMapWinForms</RootNamespace>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+    <PackageId>GkMapWinForms</PackageId>
+    <Authors>广勘智图</Authors>
+    <Description>广勘智图 - WinForms + WebView2 架构的测绘看图软件</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" />
+  </ItemGroup>
+  <!-- 将 React 构建产物作为嵌入资源打进 exe，使交付物为真正单文件（无需附带 webroot 文件夹）。
+       用 Target + LogicalName 显式固定资源名为 webroot.<相对build的路径>，确保 LocalServer.TryEmbedded 能按此名取回。 -->
+  <Target Name="EmbedWebroot" BeforeTargets="BeforeBuild">
+    <ItemGroup>
+      <_WebFiles Include="..\react-app\build\**\*" Exclude="..\react-app\build\**\*.map" />
+      <EmbeddedResource Include="@(_WebFiles)">
+        <LogicalName>webroot.%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
+      </EmbeddedResource>
+    </ItemGroup>
+  </Target>
+  <!-- 诊断：打印每个嵌入资源名，确认 TryEmbedded 能按 webroot.<相对路径> 取回 -->
+  <Target Name="DumpWebroot" AfterTargets="EmbedWebroot" BeforeTargets="CoreCompile">
+    <Message Text="WEBRES=%(EmbeddedResource.LogicalName)" Importance="high" />
+  </Target>
+</Project>
