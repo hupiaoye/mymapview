@@ -1,5 +1,5 @@
 import { Feature } from 'ol';
-import { Point, LineString, Polygon, MultiLineString } from 'ol/geom';
+import { Point, LineString, Polygon, MultiLineString, GeometryCollection } from 'ol/geom';
 import { fromLonLat } from 'ol/proj';
 import { Style, Fill, Stroke, Circle as CircleStyle, Text } from 'ol/style';
 import { convertCoordinate, COORD_SYSTEMS } from './coordSystems';
@@ -19,13 +19,15 @@ const DXF_COLORS = {
 
 // 统一文字字体族（任务2优化）：优先清晰无衬线字体栈，保证中文高程注记与中文注记都细体、清晰。
 // 配合 buildTextStyle 的白色光晕(halo)进一步提高画布对比度与可读性。
-const TEXT_FONT_FAMILY = "'Microsoft YaHei Light','Microsoft YaHei UI Light','Microsoft YaHei','PingFang SC','Helvetica Neue',Arial,sans-serif";
+// 优先使用各平台自带「细体」字族；字重统一走 buildTextStyle 的 300(细)，
+// 配合更细的白色光晕，使所有 DXF 文字在地图上更细更清晰（任务：字体细化）。
+const TEXT_FONT_FAMILY = "'Standard','Microsoft YaHei Light','PingFang SC Light','SimSun','Arial',sans-serif";
 
 // GCD 高程注记样式（本次 Bug 修复）：
 // 高程数值恒定橙红色、细体(normal)、恒定屏幕像素(scale:undefined，不随缩放放大)。
 // 与现有 GCD 点色(#FF6600)同源，取更醒目的橙红；复用 dxf_text 类型与现有样式管线。
 const GCD_ELEVATION_COLOR = '#ff5500';
-const GCD_ELEVATION_FONT_SIZE = 14;
+const GCD_ELEVATION_FONT_SIZE = 12;
 
 // GCD 高程点（小圆点符号）恒定屏幕像素半径，绝不随地图缩放变大变小（任务3）。
 const GCD_ELEVATION_DOT_RADIUS = 3.5;
@@ -51,17 +53,19 @@ const GCD_ELEVATION_DOT_RADIUS = 3.5;
  * @returns {Text}
  */
 function buildTextStyle(o) {
-  const font = `${o.fontWeight || 'normal'} ${o.fontSize || 12}px ${o.fontFamily || TEXT_FONT_FAMILY}`;
+  // 字重默认 300(细)，配合 Light 字族使文字更细；光晕默认收窄到 0.8，进一步减细观感。
+  const fontWeight = o.fontWeight || '300';
+  const font = `${fontWeight} ${o.fontSize || 12}px ${o.fontFamily || TEXT_FONT_FAMILY}`;
   return new Text({
     text: o.text,
     font,
     fill: new Fill({ color: o.color || '#000000' }),
-    stroke: new Stroke({ color: o.haloColor || 'white', width: o.haloWidth != null ? o.haloWidth : 1.2 }),
+    stroke: new Stroke({ color: o.haloColor || 'white', width: o.haloWidth != null ? o.haloWidth : 0.8 }),
     textAlign: o.textAlign || 'center',
     textBaseline: o.textBaseline || 'middle',
     offsetX: o.offsetX || 0,
     offsetY: o.offsetY || 0,
-    scale: undefined // 恒定屏幕像素，不随缩放放大
+    scale: 1 // 显式恒定屏幕像素（scale=1），绝不随地图缩放放大/缩小
   });
 }
 
@@ -75,7 +79,7 @@ const layerColorMap = {};
  * @param {string} unit - 坐标单位
  * @returns {Object} 包含features和layers信息
  */
-export async function parseDXF(content, sourceCoordSystem = 'wgs84', unit = null) {
+export async function parseDXF(content, sourceCoordSystem = 'wgs84', unit = null, onProgress = null) {
   const features = [];
   const layers = {};
   
@@ -164,6 +168,13 @@ export async function parseDXF(content, sourceCoordSystem = 'wgs84', unit = null
             // 这里回退 2 行使其重新指向该 '0'，主循环才能正确识别下一个实体。
             // 修复：此前直接 i = result.nextIndex 会导致每两个实体被跳过一个（块参照等大量丢失）。
             i = result.nextIndex - 2;
+            // 大文件性能优化：周期性上报进度 + 让出主线程，避免 UI 冻结（Bug A）
+            if (onProgress && entityCount % 1000 === 0) {
+              try { onProgress(Math.min(1, i / lines.length), entityCount); } catch (e) { /* 忽略进度回调异常 */ }
+            }
+            if (entityCount % 20000 === 0) {
+              await new Promise(r => setTimeout(r, 0)); // 让出主线程，渲染进度条/响应交互
+            }
             continue;
           }
           
@@ -179,6 +190,13 @@ export async function parseDXF(content, sourceCoordSystem = 'wgs84', unit = null
             // 这里回退 2 行使其重新指向该 '0'，主循环才能正确识别下一个实体。
             // 修复：此前直接 i = result.nextIndex 会导致每两个实体被跳过一个（块参照等大量丢失）。
             i = result.nextIndex - 2;
+            // 大文件性能优化：周期性上报进度 + 让出主线程，避免 UI 冻结（Bug A）
+            if (onProgress && entityCount % 1000 === 0) {
+              try { onProgress(Math.min(1, i / lines.length), entityCount); } catch (e) { /* 忽略进度回调异常 */ }
+            }
+            if (entityCount % 20000 === 0) {
+              await new Promise(r => setTimeout(r, 0)); // 让出主线程，渲染进度条/响应交互
+            }
             continue;
           }
           
@@ -194,6 +212,13 @@ export async function parseDXF(content, sourceCoordSystem = 'wgs84', unit = null
             // 这里回退 2 行使其重新指向该 '0'，主循环才能正确识别下一个实体。
             // 修复：此前直接 i = result.nextIndex 会导致每两个实体被跳过一个（块参照等大量丢失）。
             i = result.nextIndex - 2;
+            // 大文件性能优化：周期性上报进度 + 让出主线程，避免 UI 冻结（Bug A）
+            if (onProgress && entityCount % 1000 === 0) {
+              try { onProgress(Math.min(1, i / lines.length), entityCount); } catch (e) { /* 忽略进度回调异常 */ }
+            }
+            if (entityCount % 20000 === 0) {
+              await new Promise(r => setTimeout(r, 0)); // 让出主线程，渲染进度条/响应交互
+            }
             continue;
           }
           
@@ -209,6 +234,13 @@ export async function parseDXF(content, sourceCoordSystem = 'wgs84', unit = null
             // 这里回退 2 行使其重新指向该 '0'，主循环才能正确识别下一个实体。
             // 修复：此前直接 i = result.nextIndex 会导致每两个实体被跳过一个（块参照等大量丢失）。
             i = result.nextIndex - 2;
+            // 大文件性能优化：周期性上报进度 + 让出主线程，避免 UI 冻结（Bug A）
+            if (onProgress && entityCount % 1000 === 0) {
+              try { onProgress(Math.min(1, i / lines.length), entityCount); } catch (e) { /* 忽略进度回调异常 */ }
+            }
+            if (entityCount % 20000 === 0) {
+              await new Promise(r => setTimeout(r, 0)); // 让出主线程，渲染进度条/响应交互
+            }
             continue;
           }
           
@@ -224,6 +256,13 @@ export async function parseDXF(content, sourceCoordSystem = 'wgs84', unit = null
             // 这里回退 2 行使其重新指向该 '0'，主循环才能正确识别下一个实体。
             // 修复：此前直接 i = result.nextIndex 会导致每两个实体被跳过一个（块参照等大量丢失）。
             i = result.nextIndex - 2;
+            // 大文件性能优化：周期性上报进度 + 让出主线程，避免 UI 冻结（Bug A）
+            if (onProgress && entityCount % 1000 === 0) {
+              try { onProgress(Math.min(1, i / lines.length), entityCount); } catch (e) { /* 忽略进度回调异常 */ }
+            }
+            if (entityCount % 20000 === 0) {
+              await new Promise(r => setTimeout(r, 0)); // 让出主线程，渲染进度条/响应交互
+            }
             continue;
           }
           
@@ -247,6 +286,13 @@ export async function parseDXF(content, sourceCoordSystem = 'wgs84', unit = null
             // 这里回退 2 行使其重新指向该 '0'，主循环才能正确识别下一个实体。
             // 修复：此前直接 i = result.nextIndex 会导致每两个实体被跳过一个（块参照等大量丢失）。
             i = result.nextIndex - 2;
+            // 大文件性能优化：周期性上报进度 + 让出主线程，避免 UI 冻结（Bug A）
+            if (onProgress && entityCount % 1000 === 0) {
+              try { onProgress(Math.min(1, i / lines.length), entityCount); } catch (e) { /* 忽略进度回调异常 */ }
+            }
+            if (entityCount % 20000 === 0) {
+              await new Promise(r => setTimeout(r, 0)); // 让出主线程，渲染进度条/响应交互
+            }
             continue;
           }
           
@@ -262,6 +308,13 @@ export async function parseDXF(content, sourceCoordSystem = 'wgs84', unit = null
             // 这里回退 2 行使其重新指向该 '0'，主循环才能正确识别下一个实体。
             // 修复：此前直接 i = result.nextIndex 会导致每两个实体被跳过一个（块参照等大量丢失）。
             i = result.nextIndex - 2;
+            // 大文件性能优化：周期性上报进度 + 让出主线程，避免 UI 冻结（Bug A）
+            if (onProgress && entityCount % 1000 === 0) {
+              try { onProgress(Math.min(1, i / lines.length), entityCount); } catch (e) { /* 忽略进度回调异常 */ }
+            }
+            if (entityCount % 20000 === 0) {
+              await new Promise(r => setTimeout(r, 0)); // 让出主线程，渲染进度条/响应交互
+            }
             continue;
           }
           
@@ -279,6 +332,13 @@ export async function parseDXF(content, sourceCoordSystem = 'wgs84', unit = null
             // 这里回退 2 行使其重新指向该 '0'，主循环才能正确识别下一个实体。
             // 修复：此前直接 i = result.nextIndex 会导致每两个实体被跳过一个（块参照等大量丢失）。
             i = result.nextIndex - 2;
+            // 大文件性能优化：周期性上报进度 + 让出主线程，避免 UI 冻结（Bug A）
+            if (onProgress && entityCount % 1000 === 0) {
+              try { onProgress(Math.min(1, i / lines.length), entityCount); } catch (e) { /* 忽略进度回调异常 */ }
+            }
+            if (entityCount % 20000 === 0) {
+              await new Promise(r => setTimeout(r, 0)); // 让出主线程，渲染进度条/响应交互
+            }
             continue;
           }
           
@@ -295,6 +355,13 @@ export async function parseDXF(content, sourceCoordSystem = 'wgs84', unit = null
             // 这里回退 2 行使其重新指向该 '0'，主循环才能正确识别下一个实体。
             // 修复：此前直接 i = result.nextIndex 会导致每两个实体被跳过一个（块参照等大量丢失）。
             i = result.nextIndex - 2;
+            // 大文件性能优化：周期性上报进度 + 让出主线程，避免 UI 冻结（Bug A）
+            if (onProgress && entityCount % 1000 === 0) {
+              try { onProgress(Math.min(1, i / lines.length), entityCount); } catch (e) { /* 忽略进度回调异常 */ }
+            }
+            if (entityCount % 20000 === 0) {
+              await new Promise(r => setTimeout(r, 0)); // 让出主线程，渲染进度条/响应交互
+            }
             continue;
           }
         }
@@ -433,30 +500,27 @@ function readGroupCode(lines, index) {
 }
 
 /**
- * 转换坐标到WGS84
+ * 转换坐标到WGS84（同步：避免逐顶点 await 动态 import proj4 造成百万级微任务卡顿）
  */
-async function convertToWGS84(x, y, sourceSystem, unit = 'm') {
+function convertToWGS84(x, y, sourceSystem, unit = 'm') {
   let realX = x;
   let realY = y;
-  
+
   if (unit === 'mm') {
     realX = x / 1000;
     realY = y / 1000;
   }
-  
-  
+
   const sys = COORD_SYSTEMS[sourceSystem];
   if (!sys) {
     return [realX, realY];
   }
-  
-  
+
   const isProjected = sys.type === 'projected' || sys.type === 'local' || sys.type === 'military';
-  
+
   if (isProjected) {
     try {
-      const result = await convertCoordinate(realX, realY, sourceSystem, 'wgs84');
-      return result;
+      return convertCoordinate(realX, realY, sourceSystem, 'wgs84');
     } catch (e) {
       console.error('投影转换失败:', e);
       return [realX, realY];
@@ -464,7 +528,7 @@ async function convertToWGS84(x, y, sourceSystem, unit = 'm') {
   } else {
     if (sourceSystem === 'wgs84') return [realX, realY];
     try {
-      return await convertCoordinate(realX, realY, sourceSystem, 'wgs84');
+      return convertCoordinate(realX, realY, sourceSystem, 'wgs84');
     } catch (e) {
       return [realX, realY];
     }
@@ -491,8 +555,8 @@ const LAYER_STYLE_MAP = {
     point: { visible: true, radius: 3, fill: '#FF0000', stroke: 'white' },
     type: 'point'
   },
-  GCDA: {  // 控制点注记（高程数值）— 文字层！仍用红色，但任务1要求细体（normal、不倾斜）
-    text: { color: '#FF0000', fontSize: 14, fontWeight: 'normal', fontFamily: TEXT_FONT_FAMILY, strokeColor: 'white', strokeWidth: 1.4 },
+  GCDA: {  // 控制点注记（高程数值）— 文字层！仍用红色，细体(300)+更细光晕(0.9)更清晰
+    text: { color: '#FF0000', fontSize: 12, fontWeight: '300', fontFamily: TEXT_FONT_FAMILY, strokeColor: 'white', strokeWidth: 0.9 },
     type: 'text'
   },
 
@@ -553,7 +617,7 @@ const LAYER_STYLE_MAP = {
 
   // === 文字注记层（新增）===
   '文字注记': {
-    text: { color: '#000000', fontSize: 13, fontWeight: 'normal', fontFamily: TEXT_FONT_FAMILY, strokeColor: 'white', strokeWidth: 2.0 },
+    text: { color: '#000000', fontSize: 12, fontWeight: '300', fontFamily: TEXT_FONT_FAMILY, strokeColor: 'white', strokeWidth: 1.0 },
     type: 'text'
   }
 };
@@ -723,8 +787,8 @@ async function parseLINE(lines, startIndex, sourceCoordSystem, unit, layer, colo
     }
   }
   
-  const [lon1, lat1] = await convertToWGS84(x1, y1, sourceCoordSystem, unit);
-  const [lon2, lat2] = await convertToWGS84(x2, y2, sourceCoordSystem, unit);
+  const [lon1, lat1] = convertToWGS84(x1, y1, sourceCoordSystem, unit);
+  const [lon2, lat2] = convertToWGS84(x2, y2, sourceCoordSystem, unit);
   
   const feature = new Feature({
     geometry: new LineString([fromLonLat([lon1, lat1]), fromLonLat([lon2, lat2])]),
@@ -778,7 +842,7 @@ async function parseLWPOLYLINE(lines, startIndex, sourceCoordSystem, unit, layer
   // 先统一将全部顶点转换到 WGS84（保持与旧实现相同的转换次数，避免重复 await）
   const coords = [];
   for (const v of vertices) {
-    const [lon, lat] = await convertToWGS84(v[0], v[1], sourceCoordSystem, unit);
+    const [lon, lat] = convertToWGS84(v[0], v[1], sourceCoordSystem, unit);
     coords.push(fromLonLat([lon, lat]));
   }
 
@@ -886,7 +950,7 @@ async function parsePOLYLINE(lines, startIndex, sourceCoordSystem, unit, layer, 
 
   const coords = [];
   for (const v of vertices) {
-    const [lon, lat] = await convertToWGS84(v[0], v[1], sourceCoordSystem, unit);
+    const [lon, lat] = convertToWGS84(v[0], v[1], sourceCoordSystem, unit);
     coords.push(fromLonLat([lon, lat]));
   }
 
@@ -945,7 +1009,7 @@ async function parseCIRCLE(lines, startIndex, sourceCoordSystem, unit, layer, co
   
   if (radius === 0) return { feature: null, nextIndex: i };
   
-  const [lon, lat] = await convertToWGS84(cx, cy, sourceCoordSystem, unit);
+  const [lon, lat] = convertToWGS84(cx, cy, sourceCoordSystem, unit);
   const points = 36;
   const polygonCoords = [];
   const approxRadiusDeg = radius / 111000;
@@ -1010,7 +1074,7 @@ async function parseARC(lines, startIndex, sourceCoordSystem, unit, layer, color
   
   if (radius === 0) return { feature: null, nextIndex: i };
   
-  const [lon, lat] = await convertToWGS84(cx, cy, sourceCoordSystem, unit);
+  const [lon, lat] = convertToWGS84(cx, cy, sourceCoordSystem, unit);
   const startRad = (startAngle * Math.PI) / 180;
   const endRad = (endAngle * Math.PI) / 180;
   const lineCoords = [];
@@ -1068,7 +1132,7 @@ async function parsePOINT(lines, startIndex, sourceCoordSystem, unit, layer, col
     }
   }
   
-  const [lon, lat] = await convertToWGS84(x, y, sourceCoordSystem, unit);
+  const [lon, lat] = convertToWGS84(x, y, sourceCoordSystem, unit);
   
   const feature = new Feature({
     geometry: new Point(fromLonLat([lon, lat])),
@@ -1133,7 +1197,7 @@ async function parsePOINT(lines, startIndex, sourceCoordSystem, unit, layer, col
       fromZFallback: true
     });
     zFeature.setStyle(new Style({
-      text: buildTextStyle({ text: zText, color: '#FF0000', fontSize: 14, haloColor: 'white', haloWidth: 1.4 })
+      text: buildTextStyle({ text: zText, color: '#FF0000', fontSize: 12, haloColor: 'white', haloWidth: 0.9 })
     }));
     extraFeatures.push(zFeature);
   }
@@ -1170,7 +1234,7 @@ async function parseTEXT(lines, startIndex, sourceCoordSystem, unit, layer, colo
   // 修复5：清理 MTEXT 格式码，保留可见文字
   const displayText = cleanMtext(text);
 
-  const [lon, lat] = await convertToWGS84(x, y, sourceCoordSystem, unit);
+  const [lon, lat] = convertToWGS84(x, y, sourceCoordSystem, unit);
 
   const feature = new Feature({
     geometry: new Point(fromLonLat([lon, lat])),
@@ -1336,96 +1400,7 @@ function findBlock(blocks, name) {
   return null;
 }
 
-/**
- * 尝试为 GCD 高程点 INSERT 生成高程注记 text 要素（本次 Bug 修复主路径）。
- *
- * 真实地形图结构（来自对 sample.dxf 的探查）：
- *  - GCD 图层有 567 个 INSERT，全部引用块名 gc200（圆点+十字丝+HATCH 填充的符号）。
- *  - 块定义(BLOCKS 段)通常没有 ATTDEF。
- *  - 每个 INSERT 实体在实体段携带 1 个 ATTRIB 实例：tag="height"，value=高程数值(如 "7.73")。
- *  - 实体段中独立的 POINT 多在 JMD 等图层，与 GCD 无关（POINT Z 兜底对真实地形图无效）。
- *
- * 因此高程数值必须直接从 INSERT 段跟随的 ATTRIB 实例读取，位置即该 INSERT 的插入点。
- *
- * 触发条件（满足其一即可，且必须存在 height ATTRIB）：
- *  - 块名为高程符号块：gc / gc200 等（正则 /^gc\d*$/i 不匹配 gcbj 等非高程图形块）；
- *  - 图层为高程图层：GCD / GCDA（前缀匹配）。
- *
- * 产出的要素：
- *  - type: 'dxf_text'（复用 getLayerStyle / applyFeatureStyle / featureLabel 管线）；
- *  - 橙红色、细体、恒定屏幕像素(scale:undefined)；
- *  - props 标记 isGcdElevation:true，便于后续样式区分；colorOverride 保证 applyFeatureStyle 重渲染仍保持橙红。
- *
- * @param {string} blockName - INSERT 引用的块名
- * @param {string} layer - INSERT 所在图层
- * @param {Object} attribs - INSERT 段收集到的 ATTRIB 实例 { tag: value }
- * @param {number} insX - 插入点原始 x（DXF 坐标）
- * @param {number} insY - 插入点原始 y
- * @param {number} colorIndex - 实体 ACI 色号
- * @param {string} sourceCoordSystem - 源坐标系
- * @param {string} unit - 坐标单位
- * @returns {Promise<Feature|null>} 命中时返回高程注记要素，否则返回 null
- */
-async function tryBuildGcdElevation(blockName, layer, attribs, insX, insY, colorIndex, sourceCoordSystem, unit) {
-  const isGcdBlock = /^gc\d*$/i.test(blockName || '');
-  const isGcdLayer = /^(GCD|GCDA)/i.test(layer || '');
-  if (!isGcdBlock && !isGcdLayer) return null;
-
-  // 查找 tag 为 "height" 的 ATTRIB 实例（大小写不敏感），且值非空
-  let heightVal = null;
-  for (const tag of Object.keys(attribs || {})) {
-    if (tag.toLowerCase() === 'height') {
-      const v = attribs[tag];
-      if (v != null && String(v).trim() !== '') heightVal = String(v).trim();
-      break;
-    }
-  }
-  if (heightVal == null) return null;
-
-  // 插入点经坐标系转换（真实地形图中通常为高斯投影 -> WGS84）
-  const [lon, lat] = await convertToWGS84(insX, insY, sourceCoordSystem, unit);
-  if (!isFinite(lon) || !isFinite(lat)) return null;
-
-  const feat = new Feature({
-    geometry: new Point(fromLonLat([lon, lat])),
-    name: heightVal,
-    type: 'dxf_text',
-    layer: layer,
-    colorIndex: colorIndex,
-    srcCoords: [[insX, insY]],
-    fromBlock: true,
-    fromAttrib: true,
-    attTag: 'height',
-    isGcdElevation: true,
-    // colorOverride / fontSize 让 applyFeatureStyle 重渲染时仍然保持橙红、恒定字号
-    colorOverride: GCD_ELEVATION_COLOR,
-    fontSize: GCD_ELEVATION_FONT_SIZE
-  });
-
-  // 任务3：GCD 高程点渲染为「小尺寸固定屏幕大小的符号(恒定像素小圆点) + 橙红高程数字」。
-  //  - 小圆点：CircleStyle 半径恒为像素(3.5px)，绝不随地图缩放变大变小（画布点符号固定像素）；
-  //  - 数字：buildTextStyle 固定屏幕像素(scale:undefined) + 白色光晕，细体橙红、清晰；
-  //    数字偏右(offsetX)以免压在小圆点上，更接近 CAD 高程点样式。
-  const gcdImage = new CircleStyle({
-    radius: GCD_ELEVATION_DOT_RADIUS,
-    fill: new Fill({ color: GCD_ELEVATION_COLOR }),
-    stroke: new Stroke({ color: 'white', width: 1 })
-  });
-  feat.setStyle(new Style({
-    image: gcdImage,
-    text: buildTextStyle({
-      text: heightVal,
-      color: GCD_ELEVATION_COLOR,
-      fontSize: GCD_ELEVATION_FONT_SIZE,
-      haloColor: 'white',
-      haloWidth: 1.4,
-      textAlign: 'left',
-      offsetX: 6
-    })
-  }));
-
-  return feat;
-}
+// GCD 高程点改由 parseINSERT 内「炸块取圆 → 圆心Z」实现（见 parseINSERT 的 isElevationInsert 分支），此函数已废弃移除。
 
 /**
  * 解析INSERT实体（图块引用）
@@ -1433,9 +1408,9 @@ async function tryBuildGcdElevation(blockName, layer, attribs, insX, insY, color
 async function parseINSERT(lines, startIndex, sourceCoordSystem, unit, layer, colorIndex, blocks) {
   let i = startIndex;
   let blockName = '';
-  let x = 0, y = 0;
+  let x = 0, y = 0, insZ = 0;
   let rot = 0;             // 旋转角（弧度）
-  let scaleX = 1, scaleY = 1;
+  let scaleX = 1, scaleY = 1, scaleZ = 1;
   const attribs = {};      // INSERT 段内 ATTRIB 实例：{ tag: value }，用于覆盖块默认属性值
 
   while (i < lines.length) {
@@ -1476,6 +1451,8 @@ async function parseINSERT(lines, startIndex, sourceCoordSystem, unit, layer, co
       case 50: rot = ((parseFloat(value) || 0) * Math.PI) / 180; break; // DXF 旋转角为度
       case 41: scaleX = parseFloat(value) || 1; break;
       case 42: scaleY = parseFloat(value) || 1; break;
+      case 30: insZ = parseFloat(value) || 0; break;   // 插入点 Z（高程点符号块的插入点Z 即高程）
+      case 43: scaleZ = parseFloat(value) || 1; break;  // Z 方向缩放（用于炸块后圆的圆心Z 变换）
       case 62: colorIndex = parseInt(value) || colorIndex; break;
       case 420: break; // 块参照真彩色暂按实体色处理
     }
@@ -1484,130 +1461,238 @@ async function parseINSERT(lines, startIndex, sourceCoordSystem, unit, layer, co
   const block = findBlock(blocks, blockName);
   const features = [];
 
-  // 本次 Bug 修复主路径：直接从 INSERT 段携带的 ATTRIB(tag="height") 读取高程数值，
-  // 在插入点生成高程注记 text 要素（块定义无 ATTDEF 的真实地形图结构）。
-  // 与后续“块几何展开”“块 ATTDEF 文字”两条次级路径互不冲突，可并存。
-  const gcdElevationFeature = await tryBuildGcdElevation(
-    blockName, layer, attribs, x, y, colorIndex, sourceCoordSystem, unit
-  );
-  if (gcdElevationFeature) features.push(gcdElevationFeature);
+  // ===== GCD / 高程控制点：炸块取圆心Z → 固定标记 + 圆旁文字；不展开缩放几何、无"块派生"属性 =====
+  // 用户方案：GCD 等高程图层元素先炸块，读取圆的圆心 Z 坐标作为高程，在圆旁用文字填 Z 值；
+  // Standard 细体、固定屏幕像素。避免块几何按地图坐标展开导致随缩放变化，且不再标记 fromBlock。
+  const isElevLayer = /^(GCD|GCDA|GXYZ|DGX|COMPONENT|KZD)$/i.test(layer || '');
+  const isGcSymbolBlock = /^gc\d+[a-z]?$/i.test(blockName || '') || /^gcbj\d+$/i.test(blockName || '');
+  const hasElevAttrib = Object.keys(attribs || {}).length > 0;
+  const blockHasAtts = !!(block && block.atts && block.atts.length);
+  const blockHasCircle = !!(block && block.ents && block.ents.some(e => (e[0] && e[0][0] === 0) && e[0][1] === 'CIRCLE'));
+  // 高程/控制点判定：高程图层(含圆/属性) 或 任意 gc*/gcbj* 符号块（无论所在图层，如 GXYZ/ZBTZ/DLDW 上的 gcXXX）。
+  // 解耦 isElevLayer —— hsl.dxf 中高程点块分布在 GXYZ/ZBTZ/DLDW 等图层，必须都按控制点处理，保留圆心(圆点)，名字绝不取块名(避免显示"gc")。
+  const isElevationInsert = isElevLayer || isGcSymbolBlock || hasElevAttrib;
 
-  // 本轮修复：GCD 高程块(gc200 等)或 GCD 图层的 INSERT 一律抑制「随缩放变大的地图坐标块几何」展开
-  // （圆/线等几何按地图坐标绘制会随缩放变化）。但保留下方 ATTDEF 文字提取（文字恒定像素、不缩放）；
-  // 若既无 ATTRIB height、又无 ATTDEF 文字，则补一个固定像素小橙点，保证高程点可见且不随缩放变化。
-  const isGcdInsert = /^gc\d*$/i.test(blockName || '') || /^(GCD|GCDA)/i.test(layer || '');
-  const skipBlockGeom = isGcdInsert;
+  // ===== 块展开规则（2026-07-13 修正）=====
+  // 仅 GCD / DGX 图层“炸开”：分解为原始图元 + 高程数字注记。
+  // 其它所有图层（含 ZBTZ 等）一律“保持原有形状”：不炸开，把块作为单一 GeometryCollection
+  // 要素整体显示其真实形状，可整体选中/移动/编辑，但不会被分解为独立图元。
+  const shouldExplode = /^(GCD|DGX)$/i.test(layer || '');
 
-  // 修复1&3：块参照真正展开为真实几何（始终可见，不受 GCD point.visible:false 影响）
   if (block && block.ents && block.ents.length > 0) {
-    const base = block.base || [0, 0];
-    for (const ent of block.ents) {
-      const type = (ent[0] && ent[0][0] === 0) ? ent[0][1] : '';
-      // 跳过多余/嵌套图元，避免死循环与无效展开
-      if (!type || type === 'INSERT' || type === 'ATTRIB' || type === 'ATTDEF' || type === 'DIMENSION') continue;
-      // 本轮修复：GCD 高程块仅保留块内文字注记(恒定像素)，跳过随缩放变化的几何(圆/线等)
-      if (skipBlockGeom && type !== 'TEXT' && type !== 'MTEXT') continue;
+    if (shouldExplode) {
+      // ---------- 炸开路径：GCD / DGX ----------
+      const base = block.base || [0, 0];
+      // 先定位块内 CIRCLE：世界圆心 + 高程 Z（用于高程数字注记；圆本身也作为真实几何展开）
+      let circleWorld = null, circleElev = null;
+      if (blockHasCircle) {
+        for (const ent of block.ents) {
+          const t = (ent[0] && ent[0][0] === 0) ? ent[0][1] : '';
+          if (t !== 'CIRCLE') continue;
+          let lcx = 0, lcy = 0, lcz = 0;
+          for (const [c, v] of ent) {
+            if (c === 10) lcx = parseFloat(v) || 0;
+            else if (c === 20) lcy = parseFloat(v) || 0;
+            else if (c === 30) lcz = parseFloat(v) || 0;
+          }
+          const [wx, wy] = transformLocalToWorld(lcx, lcy, base, x, y, rot, scaleX, scaleY);
+          circleWorld = [wx, wy];
+          circleElev = insZ + scaleZ * lcz;
+          break;
+        }
+      }
 
-      // 将块内局部坐标变换到世界坐标（圆半径 group40 乘 sx）
-      const pairs = ent.map(([c, v]) => [c, v]);
-      for (let k = 0; k < pairs.length; k++) {
-        const c = pairs[k][0];
-        if (c === 40) {
-          pairs[k][1] = String((parseFloat(pairs[k][1]) || 0) * scaleX);
-        } else if (c === 20 || c === 21 || c === 22 || c === 23) {
-          const xCode = c - 10; // 20->10, 21->11, ...
-          for (let m = k - 1; m >= 0; m--) {
-            if (pairs[m][0] === xCode) {
-              const lx = parseFloat(pairs[m][1]) || 0;
-              const ly = parseFloat(pairs[k][1]) || 0;
-              const [wx, wy] = transformLocalToWorld(lx, ly, base, x, y, rot, scaleX, scaleY);
-              pairs[m][1] = String(wx);
-              pairs[k][1] = String(wy);
-              break;
+      // 展开所有图元为真实要素（炸开）
+      for (const ent of block.ents) {
+        const type = (ent[0] && ent[0][0] === 0) ? ent[0][1] : '';
+        if (!type || type === 'INSERT' || type === 'ATTRIB' || type === 'ATTDEF' || type === 'DIMENSION') continue;
+
+        const pairs = ent.map(([c, v]) => [c, v]);
+        for (let k = 0; k < pairs.length; k++) {
+          const c = pairs[k][0];
+          if (c === 40) {
+            pairs[k][1] = String((parseFloat(pairs[k][1]) || 0) * scaleX);
+          } else if (c === 20 || c === 21 || c === 22 || c === 23) {
+            const xCode = c - 10; // 20->10, 21->11, ...
+            for (let m = k - 1; m >= 0; m--) {
+              if (pairs[m][0] === xCode) {
+                const lx = parseFloat(pairs[m][1]) || 0;
+                const ly = parseFloat(pairs[k][1]) || 0;
+                const [wx, wy] = transformLocalToWorld(lx, ly, base, x, y, rot, scaleX, scaleY);
+                pairs[m][1] = String(wx);
+                pairs[k][1] = String(wy);
+                break;
+              }
             }
           }
         }
-      }
 
-      // 重新拼成 lines 字符串数组（code 一行、value 一行）
-      const subLines = [];
-      for (const [c, v] of pairs) {
-        subLines.push(String(c));
-        subLines.push(String(v));
-      }
+        const subLines = [];
+        for (const [c, v] of pairs) { subLines.push(String(c)); subLines.push(String(v)); }
 
-      // 调用对应子图元解析函数（startIndex=2：跳过 '0' 与实体类型两行）
-      let result = null;
-      try {
-        if (type === 'LINE') result = await parseLINE(subLines, 2, sourceCoordSystem, unit, layer, colorIndex);
-        else if (type === 'LWPOLYLINE') result = await parseLWPOLYLINE(subLines, 2, sourceCoordSystem, unit, layer, colorIndex);
-        else if (type === 'POLYLINE') result = await parsePOLYLINE(subLines, 2, sourceCoordSystem, unit, layer, colorIndex);
-        else if (type === 'POINT') result = await parsePOINT(subLines, 2, sourceCoordSystem, unit, layer, colorIndex, true);
-        else if (type === 'TEXT' || type === 'MTEXT') result = await parseTEXT(subLines, 2, sourceCoordSystem, unit, layer, colorIndex);
-        else if (type === 'CIRCLE') result = await parseCIRCLE(subLines, 2, sourceCoordSystem, unit, layer, colorIndex);
-        else if (type === 'ARC') result = await parseARC(subLines, 2, sourceCoordSystem, unit, layer, colorIndex);
-        else if (type === 'SOLID') result = await parseSOLID(subLines, 2, sourceCoordSystem, unit, layer, colorIndex);
-      } catch (e) {
-        console.error('块子图元解析失败:', type, e);
-      }
-
-      if (result && result.feature) {
-        result.feature.set('srcSystem', sourceCoordSystem);
-        result.feature.set('fromBlock', true); // 标记为块展开要素，默认可见（不受点图层 visible:false 影响）
-        features.push(result.feature);
-      }
-    }
-
-    // 修复2：块属性文字提取（ATTDEF 定义 + ATTRIB 实例）→ 生成高程数字等注记 text 要素
-    // 仅当块内含 ATTDEF 定义时展开；文字内容优先用 INSERT 段内 ATTRIB 实例值，回退 ATTDEF 的 default。
-    if (block && block.atts && block.atts.length > 0) {
-      for (const att of block.atts) {
-        const tag = att.tag;
-        // 实例值优先（INSERT 自带 ATTRIB），否则用块定义默认值兜底，保证数字仍然出现
-        const val = (attribs[tag] != null && String(attribs[tag]) !== '') ? attribs[tag] : (att.value || '');
-        if (!val) continue; // 无任何文字可标注则跳过
-        // 属性插入点（块局部坐标）经与块几何相同的变换（插入点/旋转/缩放/基点）变换到世界坐标
-        const [awx, awy] = transformLocalToWorld(att.x, att.y, base, x, y, rot, scaleX, scaleY);
-        if (!isFinite(awx) || !isFinite(awy)) continue;
-        // 复用 parseTEXT 同款文字样式逻辑（图层感知：getLayerStyle(layer).text；无则回退 DXF 颜色）
-        const subLines = [
-          '0', 'TEXT',
-          '8', layer,
-          '10', String(awx),
-          '20', String(awy),
-          '1', val
-        ];
+        let result = null;
         try {
-          const r = await parseTEXT(subLines, 2, sourceCoordSystem, unit, layer, colorIndex);
-          if (r && r.feature) {
-            r.feature.set('srcSystem', sourceCoordSystem);
-            r.feature.set('fromBlock', true);
-            r.feature.set('fromAttrib', true); // 标记为块属性文字（高程数值等）
-            r.feature.set('attTag', tag);
-            features.push(r.feature);
-          }
+          if (type === 'LINE') result = await parseLINE(subLines, 2, sourceCoordSystem, unit, layer, colorIndex);
+          else if (type === 'LWPOLYLINE') result = await parseLWPOLYLINE(subLines, 2, sourceCoordSystem, unit, layer, colorIndex);
+          else if (type === 'POLYLINE') result = await parsePOLYLINE(subLines, 2, sourceCoordSystem, unit, layer, colorIndex);
+          else if (type === 'POINT') result = await parsePOINT(subLines, 2, sourceCoordSystem, unit, layer, colorIndex, true);
+          else if (type === 'TEXT' || type === 'MTEXT') result = await parseTEXT(subLines, 2, sourceCoordSystem, unit, layer, colorIndex);
+          else if (type === 'CIRCLE') result = await parseCIRCLE(subLines, 2, sourceCoordSystem, unit, layer, colorIndex);
+          else if (type === 'ARC') result = await parseARC(subLines, 2, sourceCoordSystem, unit, layer, colorIndex);
+          else if (type === 'SOLID') result = await parseSOLID(subLines, 2, sourceCoordSystem, unit, layer, colorIndex);
         } catch (e) {
-          console.error('块属性文字生成失败:', tag, e);
+          console.error('块子图元解析失败:', type, e);
+        }
+
+        if (result && result.feature) {
+          result.feature.set('srcSystem', sourceCoordSystem);
+          result.feature.set('fromBlock', true); // 标记为块展开要素，默认可见
+          features.push(result.feature);
         }
       }
-    }
 
-    return { features, nextIndex: i };
+      // 高程数字注记：GCD/DGX 图层或 gc*/gcbj* 控制点块，输出 Z 值（圆Z > ATTRIB height > 插入点Z）
+      if (isElevationInsert) {
+        let elevZ = null;
+        if (circleElev != null && isFinite(circleElev)) elevZ = circleElev;
+        if (elevZ == null || !isFinite(elevZ)) {
+          const h = attribs && (attribs['height'] || attribs['ELEV'] || attribs['elevation']);
+          if (h != null && String(h).trim() !== '') elevZ = parseFloat(String(h));
+        }
+        if (elevZ == null || !isFinite(elevZ)) elevZ = insZ;
+        const cw = circleWorld || [x, y];
+        const [clon, clat] = convertToWGS84(cw[0], cw[1], sourceCoordSystem, unit);
+        if (isFinite(clon) && isFinite(clat)) {
+          const zText = isFinite(elevZ) ? Number(elevZ.toFixed(2)).toString() : '';
+          const elevFeat = new Feature({
+            geometry: new Point(fromLonLat([clon, clat])),
+            name: zText,
+            type: 'dxf_text',
+            layer: layer,
+            colorIndex: colorIndex,
+            srcCoords: [[cw[0], cw[1]]],
+            srcSystem: sourceCoordSystem,
+            isGcdElevation: true,
+            colorOverride: GCD_ELEVATION_COLOR,
+            fontSize: GCD_ELEVATION_FONT_SIZE
+          });
+          elevFeat.setStyle(new Style({
+            text: buildTextStyle({ text: zText, color: GCD_ELEVATION_COLOR, fontSize: GCD_ELEVATION_FONT_SIZE, haloColor: 'white', haloWidth: 0.9, textAlign: 'left', offsetX: 6 })
+          }));
+          features.push(elevFeat);
+        }
+      }
+
+      // 块属性文字（非高程块）：展开 ATTDEF/ATTRIB 为注记 text 要素
+      if (!isElevationInsert && block && block.atts && block.atts.length > 0) {
+        for (const att of block.atts) {
+          const tag = att.tag;
+          const val = (attribs[tag] != null && String(attribs[tag]) !== '') ? attribs[tag] : (att.value || '');
+          if (!val) continue;
+          const [awx, awy] = transformLocalToWorld(att.x, att.y, base, x, y, rot, scaleX, scaleY);
+          if (!isFinite(awx) || !isFinite(awy)) continue;
+          const subLines = ['0', 'TEXT', '8', layer, '10', String(awx), '20', String(awy), '1', val];
+          try {
+            const r = await parseTEXT(subLines, 2, sourceCoordSystem, unit, layer, colorIndex);
+            if (r && r.feature) {
+              r.feature.set('srcSystem', sourceCoordSystem);
+              r.feature.set('fromBlock', false);
+              r.feature.set('fromAttrib', true);
+              r.feature.set('attTag', tag);
+              features.push(r.feature);
+            }
+          } catch (e) {
+            console.error('块属性文字生成失败:', tag, e);
+          }
+        }
+      }
+
+      return { features, nextIndex: i };
+    } else {
+      // ---------- 保持形状路径：不炸开（含 ZBTZ 等所有非 GCD/DGX 图层）----------
+      // 把块内全部子图元几何收集为单一 GeometryCollection，整体显示块的真实形状；
+      // 作为“一个要素”存在，可整体选中/编辑，但不会被分解为独立图元。
+      const base = block.base || [0, 0];
+      const geoms = [];
+      for (const ent of block.ents) {
+        const type = (ent[0] && ent[0][0] === 0) ? ent[0][1] : '';
+        if (!type || type === 'INSERT' || type === 'ATTRIB' || type === 'ATTDEF' || type === 'DIMENSION') continue;
+
+        const pairs = ent.map(([c, v]) => [c, v]);
+        for (let k = 0; k < pairs.length; k++) {
+          const c = pairs[k][0];
+          if (c === 40) {
+            pairs[k][1] = String((parseFloat(pairs[k][1]) || 0) * scaleX);
+          } else if (c === 20 || c === 21 || c === 22 || c === 23) {
+            const xCode = c - 10;
+            for (let m = k - 1; m >= 0; m--) {
+              if (pairs[m][0] === xCode) {
+                const lx = parseFloat(pairs[m][1]) || 0;
+                const ly = parseFloat(pairs[k][1]) || 0;
+                const [wx, wy] = transformLocalToWorld(lx, ly, base, x, y, rot, scaleX, scaleY);
+                pairs[m][1] = String(wx);
+                pairs[k][1] = String(wy);
+                break;
+              }
+            }
+          }
+        }
+        const subLines = [];
+        for (const [c, v] of pairs) { subLines.push(String(c)); subLines.push(String(v)); }
+
+        let result = null;
+        try {
+          if (type === 'LINE') result = await parseLINE(subLines, 2, sourceCoordSystem, unit, layer, colorIndex);
+          else if (type === 'LWPOLYLINE') result = await parseLWPOLYLINE(subLines, 2, sourceCoordSystem, unit, layer, colorIndex);
+          else if (type === 'POLYLINE') result = await parsePOLYLINE(subLines, 2, sourceCoordSystem, unit, layer, colorIndex);
+          else if (type === 'POINT') result = await parsePOINT(subLines, 2, sourceCoordSystem, unit, layer, colorIndex, true);
+          else if (type === 'TEXT' || type === 'MTEXT') result = await parseTEXT(subLines, 2, sourceCoordSystem, unit, layer, colorIndex);
+          else if (type === 'CIRCLE') result = await parseCIRCLE(subLines, 2, sourceCoordSystem, unit, layer, colorIndex);
+          else if (type === 'ARC') result = await parseARC(subLines, 2, sourceCoordSystem, unit, layer, colorIndex);
+          else if (type === 'SOLID') result = await parseSOLID(subLines, 2, sourceCoordSystem, unit, layer, colorIndex);
+        } catch (e) {
+          console.error('块子图元(保持形状)解析失败:', type, e);
+        }
+        const g = result && result.feature && result.feature.getGeometry();
+        if (g) geoms.push(g);
+      }
+
+      if (geoms.length > 0) {
+        // 单一几何（如仅一个圆）直接用该几何；多个子图元合并为 GeometryCollection，整体显示块形状
+        const geom = geoms.length === 1 ? geoms[0] : new GeometryCollection(geoms);
+        const shapeFeat = new Feature({
+          geometry: geom,
+          name: blockName || 'block',
+          type: 'dxf_block',
+          layer: layer,
+          colorIndex: colorIndex,
+          srcCoords: [[x, y]],
+          srcSystem: sourceCoordSystem,
+          fromBlock: false // 保持形状：未炸开，不标记 fromBlock
+        });
+        features.push(shapeFeat);
+      }
+      return { features, nextIndex: i };
+    }
   }
 
   // 兼容：块找不到 → 生成一个插入点 Point，保持原行为（含 GCD 隐藏逻辑）
-  const [lon, lat] = await convertToWGS84(x, y, sourceCoordSystem, unit);
+  const [lon, lat] = convertToWGS84(x, y, sourceCoordSystem, unit);
   const feature = new Feature({
     geometry: new Point(fromLonLat([lon, lat])),
-    name: blockName || 'block',
+    name: isGcSymbolBlock ? '' : (blockName || 'block'),
     type: 'dxf_block',
     layer: layer,
     colorIndex: colorIndex,
-    srcCoords: [[x, y]]
+    srcCoords: [[x, y]],
+    isGcdElevation: isGcSymbolBlock
   });
 
   const lsty = getLayerStyle(layer);
-  if (lsty.point && lsty.point.visible === false) {
+  if (isGcSymbolBlock) {
+    // gc*/gcbj* 符号块：即使块定义缺失，也渲染为固定像素橙色圆点（保留圆心），不显示块名
+    feature.setStyle(new Style({ image: new CircleStyle({ radius: GCD_ELEVATION_DOT_RADIUS, fill: new Fill({ color: GCD_ELEVATION_COLOR }), stroke: new Stroke({ color: 'white', width: 1 }) }) }));
+  } else if (lsty.point && lsty.point.visible === false) {
     feature.setStyle(null);
   } else if (lsty.type === 'point' && lsty.point) {
     const p = lsty.point;
@@ -1658,10 +1743,10 @@ async function parseSOLID(lines, startIndex, sourceCoordSystem, unit, layer, col
   
   if (x4 === 0 && y4 === 0) { x4 = x3; y4 = y3; }
   
-  const p1 = await convertToWGS84(x1, y1, sourceCoordSystem, unit);
-  const p2 = await convertToWGS84(x2, y2, sourceCoordSystem, unit);
-  const p3 = await convertToWGS84(x3, y3, sourceCoordSystem, unit);
-  const p4 = await convertToWGS84(x4, y4, sourceCoordSystem, unit);
+  const p1 = convertToWGS84(x1, y1, sourceCoordSystem, unit);
+  const p2 = convertToWGS84(x2, y2, sourceCoordSystem, unit);
+  const p3 = convertToWGS84(x3, y3, sourceCoordSystem, unit);
+  const p4 = convertToWGS84(x4, y4, sourceCoordSystem, unit);
   
   const feature = new Feature({
     geometry: new Polygon([[fromLonLat(p1), fromLonLat(p2), fromLonLat(p3), fromLonLat(p4), fromLonLat(p1)]]),
@@ -1711,12 +1796,13 @@ export function applyFeatureStyle(feature) {
 
   // 文字类
   if (type === 'dxf_text') {
-    const tColor = overrideColor || (lsty.text ? lsty.text.color : (resolved || '#000000'));
+    const isGcdElev = feature.get('isGcdElevation');
+    const tColor = isGcdElev ? (overrideColor || GCD_ELEVATION_COLOR) : (overrideColor || (lsty.text ? lsty.text.color : (resolved || '#000000')));
     const fontSize = feature.get('fontSize') || (lsty.text ? lsty.text.fontSize : 12);
     const t = feature.get('name') || '';
     const haloColor = lsty.text ? (lsty.text.strokeColor || 'white') : 'white';
-    const haloWidth = lsty.text ? (lsty.text.strokeWidth || 2) : 2;
-    const isGcdElev = feature.get('isGcdElevation');
+    // GCD 高程注记用更细光晕(0.9)，与其它文字一致保持细体；编辑重渲染后仍恒定像素不缩放
+    const haloWidth = isGcdElev ? 0.9 : (lsty.text ? (lsty.text.strokeWidth || 2) : 2);
     // GCD 高程注记：数字偏右(offsetX)以免压在小圆点上，保持细体橙红、固定屏幕像素
     const textStyle = buildTextStyle({
       text: t,
@@ -1741,21 +1827,38 @@ export function applyFeatureStyle(feature) {
     return;
   }
 
-  // 点类（含块展开的点 / 找不到块时的回退插入点）
+  // 点类（含块展开的点 / 找不到块时的回退插入点 / 未炸开的块）
   if (type === 'dxf_point' || type === 'dxf_block') {
-    // 与 parsePOINT 保持一致：GCD 类点用橙色小点、其余用灰点（仅当图层隐藏点时才走此兜底）
-    const isGcd = layer === 'GCD' || layer.startsWith('GCD');
-    const base = (lsty.point && lsty.point.visible !== false)
-      ? lsty.point
-      : { visible: true, radius: isGcd ? 3 : 2, fill: isGcd ? '#FF6600' : '#888888', stroke: 'white' };
-    const radius = feature.get('pointRadius') || base.radius || (isGcd ? 3 : 2);
-    const fillColor = overrideColor || base.fill || resolved || (isGcd ? '#FF6600' : '#888888');
+    const geom = feature.getGeometry();
+    const isPointGeom = !geom || geom.getType() === 'Point';
+    if (isPointGeom) {
+      // 点几何（含找不到块时的回退插入点）：GCD 类用橙色小点、其余用灰点
+      const isGcd = layer === 'GCD' || layer.startsWith('GCD');
+      const base = (lsty.point && lsty.point.visible !== false)
+        ? lsty.point
+        : { visible: true, radius: isGcd ? 3 : 2, fill: isGcd ? '#FF6600' : '#888888', stroke: 'white' };
+      const radius = feature.get('pointRadius') || base.radius || (isGcd ? 3 : 2);
+      const fillColor = overrideColor || base.fill || resolved || (isGcd ? '#FF6600' : '#888888');
+      feature.setStyle(new Style({
+        image: new CircleStyle({
+          radius,
+          fill: new Fill({ color: fillColor }),
+          stroke: new Stroke({ color: base.stroke || 'white', width: 1 })
+        })
+      }));
+      return;
+    }
+    // 未炸开的块（GeometryCollection / 线 / 面）：用线/面样式整体显示真实形状（不分解为独立图元）
+    const lineStyle = lsty.line || DEFAULT_STYLE.line;
+    const strokeColor = overrideColor || resolved || lineStyle.color;
+    const width = feature.get('lineWidth') || lineStyle.width;
+    const polyStyle = lsty.polygon || DEFAULT_STYLE.polygon;
+    const fillColor = (polyStyle.fill && !overrideColor)
+      ? hexToRgba(strokeColor, extractAlpha(polyStyle.fill))
+      : undefined;
     feature.setStyle(new Style({
-      image: new CircleStyle({
-        radius,
-        fill: new Fill({ color: fillColor }),
-        stroke: new Stroke({ color: base.stroke || 'white', width: 1 })
-      })
+      fill: fillColor ? new Fill({ color: fillColor }) : undefined,
+      stroke: new Stroke({ color: strokeColor, width })
     }));
     return;
   }

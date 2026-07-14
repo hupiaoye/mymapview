@@ -2,6 +2,7 @@
  * 坐标系配置
  * 支持三度带、三参数、七参数转换
  */
+import proj4 from 'proj4';
 
 // 三度带预设（中央子午线）
 export const THREE_DEGREE_ZONES = [
@@ -305,7 +306,7 @@ export function transformFixed(x, y, params) {
 /**
  * 坐标转换（使用proj4）
  */
-export async function convertCoordinate(x, y, fromSystemId, toSystemId) {
+export function convertCoordinate(x, y, fromSystemId, toSystemId) {
 
   // WGS84/GCJ02/BD09 之间的偏移算法
   if (['wgs84', 'gcj02', 'bd09'].includes(fromSystemId) &&
@@ -330,12 +331,11 @@ export async function convertCoordinate(x, y, fromSystemId, toSystemId) {
     throw new Error('无法获取坐标系定义');
   }
 
-  const proj4 = await import('proj4');
   const fromName = 'from_' + fromSystemId;
   const toName = 'to_' + toSystemId;
-  proj4.default.defs(fromName, fromDef);
-  proj4.default.defs(toName, toDef);
-  return proj4.default(fromName, toName, [x, y]);
+  proj4.defs(fromName, fromDef);
+  proj4.defs(toName, toDef);
+  return proj4(fromName, toName, [x, y]);
 }
 
 /** 判断是否为需要走自定义转换流程的坐标系 */
@@ -367,13 +367,11 @@ function buildProj4Def(id, sys) {
  *  2) 参数型（四/七/简化/固定），视为相对 WGS84 的偏移
  * 任意一侧为 WGS84 时直接单向换算；两侧均为自定义时经 WGS84 中转。
  */
-export async function convertCustomSystem(x, y, fromSystemId, toSystemId) {
+export function convertCustomSystem(x, y, fromSystemId, toSystemId) {
   const fromSystem = getCoordSystem(fromSystemId);
   const toSystem = getCoordSystem(toSystemId);
 
-  const proj4 = (await import('proj4')).default;
-
-  const toWgs84 = async (sys, id, cx, cy) => {
+  const toWgs84 = (sys, id, cx, cy) => {
     if (id === 'wgs84') return [cx, cy];
     if (!sys) return [cx, cy];
     const def = sys.proj4 || buildTmercDefFromSystem(sys);
@@ -383,7 +381,7 @@ export async function convertCustomSystem(x, y, fromSystemId, toSystemId) {
     return proj4(name, 'EPSG:4326', [cx, cy]);
   };
 
-  const fromWgs84 = async (sys, id, lon, lat) => {
+  const fromWgs84 = (sys, id, lon, lat) => {
     if (id === 'wgs84') return [lon, lat];
     if (!sys) return [lon, lat];
     const def = sys.proj4 || buildTmercDefFromSystem(sys);
@@ -396,7 +394,7 @@ export async function convertCustomSystem(x, y, fromSystemId, toSystemId) {
   if (fromSystemId === 'wgs84') return fromWgs84(toSystem, toSystemId, x, y);
   if (toSystemId === 'wgs84') return toWgs84(fromSystem, fromSystemId, x, y);
 
-  const [lon, lat] = await toWgs84(fromSystem, fromSystemId, x, y);
+  const [lon, lat] = toWgs84(fromSystem, fromSystemId, x, y);
   return fromWgs84(toSystem, toSystemId, lon, lat);
 }
 

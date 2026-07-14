@@ -19,13 +19,15 @@ const DXF_COLORS = {
 
 // 统一文字字体族（任务2优化）：优先清晰无衬线字体栈，保证中文高程注记与中文注记都细体、清晰。
 // 配合 buildTextStyle 的白色光晕(halo)进一步提高画布对比度与可读性。
-const TEXT_FONT_FAMILY = "'Microsoft YaHei Light','Microsoft YaHei UI Light','Microsoft YaHei','PingFang SC','Helvetica Neue',Arial,sans-serif";
+// 优先使用各平台自带「细体」字族；字重统一走 buildTextStyle 的 300(细)，
+// 配合更细的白色光晕，使所有 DXF 文字在地图上更细更清晰（任务：字体细化）。
+const TEXT_FONT_FAMILY = "'Standard','Microsoft YaHei Light','PingFang SC Light','SimSun','Arial',sans-serif";
 
 // GCD 高程注记样式（本次 Bug 修复）：
 // 高程数值恒定橙红色、细体(normal)、恒定屏幕像素(scale:undefined，不随缩放放大)。
 // 与现有 GCD 点色(#FF6600)同源，取更醒目的橙红；复用 dxf_text 类型与现有样式管线。
 const GCD_ELEVATION_COLOR = '#ff5500';
-const GCD_ELEVATION_FONT_SIZE = 14;
+const GCD_ELEVATION_FONT_SIZE = 12;
 
 // GCD 高程点（小圆点符号）恒定屏幕像素半径，绝不随地图缩放变大变小（任务3）。
 const GCD_ELEVATION_DOT_RADIUS = 3.5;
@@ -51,12 +53,14 @@ const GCD_ELEVATION_DOT_RADIUS = 3.5;
  * @returns {Text}
  */
 function buildTextStyle(o) {
-  const font = `${o.fontWeight || 'normal'} ${o.fontSize || 12}px ${o.fontFamily || TEXT_FONT_FAMILY}`;
+  // 字重默认 300(细)，配合 Light 字族使文字更细；光晕默认收窄到 0.8，进一步减细观感。
+  const fontWeight = o.fontWeight || '300';
+  const font = `${fontWeight} ${o.fontSize || 12}px ${o.fontFamily || TEXT_FONT_FAMILY}`;
   return new Text({
     text: o.text,
     font,
     fill: new Fill({ color: o.color || '#000000' }),
-    stroke: new Stroke({ color: o.haloColor || 'white', width: o.haloWidth != null ? o.haloWidth : 1.2 }),
+    stroke: new Stroke({ color: o.haloColor || 'white', width: o.haloWidth != null ? o.haloWidth : 0.8 }),
     textAlign: o.textAlign || 'center',
     textBaseline: o.textBaseline || 'middle',
     offsetX: o.offsetX || 0,
@@ -491,8 +495,8 @@ const LAYER_STYLE_MAP = {
     point: { visible: true, radius: 3, fill: '#FF0000', stroke: 'white' },
     type: 'point'
   },
-  GCDA: {  // 控制点注记（高程数值）— 文字层！仍用红色，但任务1要求细体（normal、不倾斜）
-    text: { color: '#FF0000', fontSize: 14, fontWeight: 'normal', fontFamily: TEXT_FONT_FAMILY, strokeColor: 'white', strokeWidth: 1.4 },
+  GCDA: {  // 控制点注记（高程数值）— 文字层！仍用红色，细体(300)+更细光晕(0.9)更清晰
+    text: { color: '#FF0000', fontSize: 12, fontWeight: '300', fontFamily: TEXT_FONT_FAMILY, strokeColor: 'white', strokeWidth: 0.9 },
     type: 'text'
   },
 
@@ -553,7 +557,7 @@ const LAYER_STYLE_MAP = {
 
   // === 文字注记层（新增）===
   '文字注记': {
-    text: { color: '#000000', fontSize: 13, fontWeight: 'normal', fontFamily: TEXT_FONT_FAMILY, strokeColor: 'white', strokeWidth: 2.0 },
+    text: { color: '#000000', fontSize: 12, fontWeight: '300', fontFamily: TEXT_FONT_FAMILY, strokeColor: 'white', strokeWidth: 1.0 },
     type: 'text'
   }
 };
@@ -1133,7 +1137,7 @@ async function parsePOINT(lines, startIndex, sourceCoordSystem, unit, layer, col
       fromZFallback: true
     });
     zFeature.setStyle(new Style({
-      text: buildTextStyle({ text: zText, color: '#FF0000', fontSize: 14, haloColor: 'white', haloWidth: 1.4 })
+      text: buildTextStyle({ text: zText, color: '#FF0000', fontSize: 12, haloColor: 'white', haloWidth: 0.9 })
     }));
     extraFeatures.push(zFeature);
   }
@@ -1336,96 +1340,7 @@ function findBlock(blocks, name) {
   return null;
 }
 
-/**
- * 尝试为 GCD 高程点 INSERT 生成高程注记 text 要素（本次 Bug 修复主路径）。
- *
- * 真实地形图结构（来自对 sample.dxf 的探查）：
- *  - GCD 图层有 567 个 INSERT，全部引用块名 gc200（圆点+十字丝+HATCH 填充的符号）。
- *  - 块定义(BLOCKS 段)通常没有 ATTDEF。
- *  - 每个 INSERT 实体在实体段携带 1 个 ATTRIB 实例：tag="height"，value=高程数值(如 "7.73")。
- *  - 实体段中独立的 POINT 多在 JMD 等图层，与 GCD 无关（POINT Z 兜底对真实地形图无效）。
- *
- * 因此高程数值必须直接从 INSERT 段跟随的 ATTRIB 实例读取，位置即该 INSERT 的插入点。
- *
- * 触发条件（满足其一即可，且必须存在 height ATTRIB）：
- *  - 块名为高程符号块：gc / gc200 等（正则 /^gc\d*$/i 不匹配 gcbj 等非高程图形块）；
- *  - 图层为高程图层：GCD / GCDA（前缀匹配）。
- *
- * 产出的要素：
- *  - type: 'dxf_text'（复用 getLayerStyle / applyFeatureStyle / featureLabel 管线）；
- *  - 橙红色、细体、恒定屏幕像素(scale:undefined)；
- *  - props 标记 isGcdElevation:true，便于后续样式区分；colorOverride 保证 applyFeatureStyle 重渲染仍保持橙红。
- *
- * @param {string} blockName - INSERT 引用的块名
- * @param {string} layer - INSERT 所在图层
- * @param {Object} attribs - INSERT 段收集到的 ATTRIB 实例 { tag: value }
- * @param {number} insX - 插入点原始 x（DXF 坐标）
- * @param {number} insY - 插入点原始 y
- * @param {number} colorIndex - 实体 ACI 色号
- * @param {string} sourceCoordSystem - 源坐标系
- * @param {string} unit - 坐标单位
- * @returns {Promise<Feature|null>} 命中时返回高程注记要素，否则返回 null
- */
-async function tryBuildGcdElevation(blockName, layer, attribs, insX, insY, colorIndex, sourceCoordSystem, unit) {
-  const isGcdBlock = /^gc\d*$/i.test(blockName || '');
-  const isGcdLayer = /^(GCD|GCDA)/i.test(layer || '');
-  if (!isGcdBlock && !isGcdLayer) return null;
-
-  // 查找 tag 为 "height" 的 ATTRIB 实例（大小写不敏感），且值非空
-  let heightVal = null;
-  for (const tag of Object.keys(attribs || {})) {
-    if (tag.toLowerCase() === 'height') {
-      const v = attribs[tag];
-      if (v != null && String(v).trim() !== '') heightVal = String(v).trim();
-      break;
-    }
-  }
-  if (heightVal == null) return null;
-
-  // 插入点经坐标系转换（真实地形图中通常为高斯投影 -> WGS84）
-  const [lon, lat] = await convertToWGS84(insX, insY, sourceCoordSystem, unit);
-  if (!isFinite(lon) || !isFinite(lat)) return null;
-
-  const feat = new Feature({
-    geometry: new Point(fromLonLat([lon, lat])),
-    name: heightVal,
-    type: 'dxf_text',
-    layer: layer,
-    colorIndex: colorIndex,
-    srcCoords: [[insX, insY]],
-    fromBlock: true,
-    fromAttrib: true,
-    attTag: 'height',
-    isGcdElevation: true,
-    // colorOverride / fontSize 让 applyFeatureStyle 重渲染时仍然保持橙红、恒定字号
-    colorOverride: GCD_ELEVATION_COLOR,
-    fontSize: GCD_ELEVATION_FONT_SIZE
-  });
-
-  // 任务3：GCD 高程点渲染为「小尺寸固定屏幕大小的符号(恒定像素小圆点) + 橙红高程数字」。
-  //  - 小圆点：CircleStyle 半径恒为像素(3.5px)，绝不随地图缩放变大变小（画布点符号固定像素）；
-  //  - 数字：buildTextStyle 固定屏幕像素(scale:undefined) + 白色光晕，细体橙红、清晰；
-  //    数字偏右(offsetX)以免压在小圆点上，更接近 CAD 高程点样式。
-  const gcdImage = new CircleStyle({
-    radius: GCD_ELEVATION_DOT_RADIUS,
-    fill: new Fill({ color: GCD_ELEVATION_COLOR }),
-    stroke: new Stroke({ color: 'white', width: 1 })
-  });
-  feat.setStyle(new Style({
-    image: gcdImage,
-    text: buildTextStyle({
-      text: heightVal,
-      color: GCD_ELEVATION_COLOR,
-      fontSize: GCD_ELEVATION_FONT_SIZE,
-      haloColor: 'white',
-      haloWidth: 1.4,
-      textAlign: 'left',
-      offsetX: 6
-    })
-  }));
-
-  return feat;
-}
+// GCD 高程点改由 parseINSERT 内「炸块取圆 → 圆心Z」实现（见 parseINSERT 的 isElevationInsert 分支），此函数已废弃移除。
 
 /**
  * 解析INSERT实体（图块引用）
@@ -1433,9 +1348,9 @@ async function tryBuildGcdElevation(blockName, layer, attribs, insX, insY, color
 async function parseINSERT(lines, startIndex, sourceCoordSystem, unit, layer, colorIndex, blocks) {
   let i = startIndex;
   let blockName = '';
-  let x = 0, y = 0;
+  let x = 0, y = 0, insZ = 0;
   let rot = 0;             // 旋转角（弧度）
-  let scaleX = 1, scaleY = 1;
+  let scaleX = 1, scaleY = 1, scaleZ = 1;
   const attribs = {};      // INSERT 段内 ATTRIB 实例：{ tag: value }，用于覆盖块默认属性值
 
   while (i < lines.length) {
@@ -1476,6 +1391,8 @@ async function parseINSERT(lines, startIndex, sourceCoordSystem, unit, layer, co
       case 50: rot = ((parseFloat(value) || 0) * Math.PI) / 180; break; // DXF 旋转角为度
       case 41: scaleX = parseFloat(value) || 1; break;
       case 42: scaleY = parseFloat(value) || 1; break;
+      case 30: insZ = parseFloat(value) || 0; break;   // 插入点 Z（高程点符号块的插入点Z 即高程）
+      case 43: scaleZ = parseFloat(value) || 1; break;  // Z 方向缩放（用于炸块后圆的圆心Z 变换）
       case 62: colorIndex = parseInt(value) || colorIndex; break;
       case 420: break; // 块参照真彩色暂按实体色处理
     }
@@ -1484,19 +1401,137 @@ async function parseINSERT(lines, startIndex, sourceCoordSystem, unit, layer, co
   const block = findBlock(blocks, blockName);
   const features = [];
 
-  // 本次 Bug 修复主路径：直接从 INSERT 段携带的 ATTRIB(tag="height") 读取高程数值，
-  // 在插入点生成高程注记 text 要素（块定义无 ATTDEF 的真实地形图结构）。
-  // 与后续“块几何展开”“块 ATTDEF 文字”两条次级路径互不冲突，可并存。
-  const gcdElevationFeature = await tryBuildGcdElevation(
-    blockName, layer, attribs, x, y, colorIndex, sourceCoordSystem, unit
-  );
-  if (gcdElevationFeature) features.push(gcdElevationFeature);
+  // ===== GCD / 高程控制点：炸块取圆心Z → 固定标记 + 圆旁文字；不展开缩放几何、无"块派生"属性 =====
+  // 用户方案：GCD 等高程图层元素先炸块，读取圆的圆心 Z 坐标作为高程，在圆旁用文字填 Z 值；
+  // Standard 细体、固定屏幕像素。避免块几何按地图坐标展开导致随缩放变化，且不再标记 fromBlock。
+  const isElevLayer = /^(GCD|GCDA|GXYZ|COMPONENT|KZD)$/i.test(layer || '');
+  const isGcSymbolBlock = /^gc\d+[a-z]?$/i.test(blockName || '') || /^gcbj\d+$/i.test(blockName || '');
+  const isControlSymbol = /^gc\d+[a-z]$/i.test(blockName || '') || /^gcbj\d+$/i.test(blockName || '');
+  const hasElevAttrib = Object.keys(attribs || {}).length > 0;
+  const blockHasAtts = !!(block && block.atts && block.atts.length);
+  const blockHasCircle = !!(block && block.ents && block.ents.some(e => (e[0] && e[0][0] === 0) && e[0][1] === 'CIRCLE'));
+  // 仅当【高程图层 且 (含圆 / 符号块 / 带属性)】才走炸块取Z；普通"GCD"块(无圆无属性)仍正常展开(见 verify_fix.mjs)
+  const isElevationInsert = isElevLayer && (blockHasCircle || isGcSymbolBlock || hasElevAttrib || blockHasAtts);
 
-  // 本轮修复：GCD 高程块(gc200 等)或 GCD 图层的 INSERT 一律抑制「随缩放变大的地图坐标块几何」展开
-  // （圆/线等几何按地图坐标绘制会随缩放变化）。但保留下方 ATTDEF 文字提取（文字恒定像素、不缩放）；
-  // 若既无 ATTRIB height、又无 ATTDEF 文字，则补一个固定像素小橙点，保证高程点可见且不随缩放变化。
-  const isGcdInsert = /^gc\d*$/i.test(blockName || '') || /^(GCD|GCDA)/i.test(layer || '');
-  const skipBlockGeom = isGcdInsert;
+  if (isElevationInsert) {
+    // 1) 炸块：在块内找 CIRCLE，计算其变换后圆心(含Z)；wz = 插入点Z + Z缩放 × 圆局部Z
+    let circleFound = false, cx2 = x, cy2 = y, elevZ = null;
+    if (blockHasCircle) {
+      const b = block.base || [0, 0];
+      for (const ent of block.ents) {
+        const type = (ent[0] && ent[0][0] === 0) ? ent[0][1] : '';
+        if (type !== 'CIRCLE') continue;
+        let lcx = 0, lcy = 0, lcz = 0;
+        for (const [c, v] of ent) {
+          if (c === 10) lcx = parseFloat(v) || 0;
+          else if (c === 20) lcy = parseFloat(v) || 0;
+          else if (c === 30) lcz = parseFloat(v) || 0;
+        }
+        const [wx, wy] = transformLocalToWorld(lcx, lcy, b, x, y, rot, scaleX, scaleY);
+        cx2 = wx; cy2 = wy;
+        elevZ = insZ + scaleZ * lcz;
+        circleFound = true;
+        break; // 取第一个圆作为高程点符号
+      }
+    }
+    // 2) 高程取值优先级：圆心Z > ATTRIB(height/ELEV) > 插入点Z
+    if (elevZ == null || !isFinite(elevZ)) {
+      const h = attribs && (attribs['height'] || attribs['ELEV'] || attribs['elevation']);
+      if (h != null && String(h).trim() !== '') elevZ = parseFloat(String(h));
+    }
+    if (elevZ == null || !isFinite(elevZ)) elevZ = insZ;
+
+    // 3) 有圆：渲染「固定像素小圆点 + 圆旁 Z 值文字」(Standard 细体、恒定屏幕像素，不随缩放)
+    if (circleFound) {
+      const [lon, lat] = await convertToWGS84(cx2, cy2, sourceCoordSystem, unit);
+      if (isFinite(lon) && isFinite(lat)) {
+        const zText = isFinite(elevZ) ? Number(elevZ.toFixed(2)).toString() : '';
+        const feat = new Feature({
+          geometry: new Point(fromLonLat([lon, lat])),
+          name: zText,
+          type: 'dxf_text',
+          layer: layer,
+          colorIndex: colorIndex,
+          srcCoords: [[cx2, cy2]],
+          srcSystem: sourceCoordSystem,
+          isGcdElevation: true,
+          colorOverride: GCD_ELEVATION_COLOR,
+          fontSize: GCD_ELEVATION_FONT_SIZE
+        });
+        feat.setStyle(new Style({
+          image: new CircleStyle({ radius: GCD_ELEVATION_DOT_RADIUS, fill: new Fill({ color: GCD_ELEVATION_COLOR }), stroke: new Stroke({ color: 'white', width: 1 }) }),
+          text: buildTextStyle({ text: zText, color: GCD_ELEVATION_COLOR, fontSize: GCD_ELEVATION_FONT_SIZE, haloColor: 'white', haloWidth: 0.9, textAlign: 'left', offsetX: 6 })
+        }));
+        features.push(feat);
+      }
+      return { features, nextIndex: i };
+    }
+
+    // 4) 无圆但有 ATTDEF 文字（如 GCDPT 的 ELEV）：展平为纯文本，不标记 fromBlock（无"块派生"）
+    if (blockHasAtts) {
+      const b = block.base || [0, 0];
+      for (const att of block.atts) {
+        const val = (attribs[att.tag] != null && String(attribs[att.tag]) !== '') ? attribs[att.tag] : (att.value || '');
+        if (!val) continue;
+        const [awx, awy] = transformLocalToWorld(att.x, att.y, b, x, y, rot, scaleX, scaleY);
+        if (!isFinite(awx) || !isFinite(awy)) continue;
+        const subLines = ['0', 'TEXT', '8', layer, '10', String(awx), '20', String(awy), '1', val];
+        try {
+          const r = await parseTEXT(subLines, 2, sourceCoordSystem, unit, layer, colorIndex);
+          if (r && r.feature) {
+            r.feature.set('srcSystem', sourceCoordSystem);
+            r.feature.set('fromAttrib', true);
+            r.feature.set('attTag', att.tag);
+            features.push(r.feature);
+          }
+        } catch (e) { /* 忽略单个属性文字生成失败 */ }
+      }
+      return { features, nextIndex: i };
+    }
+
+    // 5) 控制点符号块（gc013g/gcbjXXXX）无高程无圆：仅固定像素圆点（不缩放、无块派生）
+    if (isControlSymbol) {
+      const [lon, lat] = await convertToWGS84(x, y, sourceCoordSystem, unit);
+      if (isFinite(lon) && isFinite(lat)) {
+        const lsty = getLayerStyle(layer);
+        const dotColor = (lsty.point && lsty.point.fill) || GCD_ELEVATION_COLOR;
+        const dot = new Feature({
+          geometry: new Point(fromLonLat([lon, lat])),
+          name: blockName || 'block',
+          type: 'dxf_point',
+          layer: layer,
+          colorIndex: colorIndex,
+          srcCoords: [[x, y]],
+          srcSystem: sourceCoordSystem,
+          isGcdElevation: true
+        });
+        dot.setStyle(new Style({ image: new CircleStyle({ radius: GCD_ELEVATION_DOT_RADIUS, fill: new Fill({ color: dotColor }), stroke: new Stroke({ color: 'white', width: 1 }) }) }));
+        features.push(dot);
+      }
+      return { features, nextIndex: i };
+    }
+
+    // 6) 其它（高程图层但块无圆无属性）：仍按普通插入点兜底，不展开几何避免缩放
+    const [lonF, latF] = await convertToWGS84(x, y, sourceCoordSystem, unit);
+    if (isFinite(lonF) && isFinite(latF)) {
+      const fb = new Feature({
+        geometry: new Point(fromLonLat([lonF, latF])),
+        name: blockName || 'block',
+        type: 'dxf_point',
+        layer: layer,
+        colorIndex: colorIndex,
+        srcCoords: [[x, y]],
+        srcSystem: sourceCoordSystem,
+        isGcdElevation: true
+      });
+      fb.setStyle(new Style({ image: new CircleStyle({ radius: GCD_ELEVATION_DOT_RADIUS, fill: new Fill({ color: GCD_ELEVATION_COLOR }), stroke: new Stroke({ color: 'white', width: 1 }) }) }));
+      features.push(fb);
+    }
+    return { features, nextIndex: i };
+  }
+
+  // 非高程块：保留原展开逻辑（含 skipBlockGeom 抑制缩放几何、块属性文字提取）
+  const skipBlockGeom = isGcSymbolBlock || blockHasAtts;
 
   // 修复1&3：块参照真正展开为真实几何（始终可见，不受 GCD point.visible:false 影响）
   if (block && block.ents && block.ents.length > 0) {
@@ -1580,10 +1615,11 @@ async function parseINSERT(lines, startIndex, sourceCoordSystem, unit, layer, co
         try {
           const r = await parseTEXT(subLines, 2, sourceCoordSystem, unit, layer, colorIndex);
           if (r && r.feature) {
-            r.feature.set('srcSystem', sourceCoordSystem);
-            r.feature.set('fromBlock', true);
-            r.feature.set('fromAttrib', true); // 标记为块属性文字（高程数值等）
-            r.feature.set('attTag', tag);
+          r.feature.set('srcSystem', sourceCoordSystem);
+          // 高程/控制点块（GCDPT 等）展平为纯文本，不再标记 fromBlock，避免属性面板出现"块派生:是"
+          r.feature.set('fromBlock', !isElevationInsert);
+          r.feature.set('fromAttrib', true); // 标记为块属性文字（高程数值等）
+          r.feature.set('attTag', tag);
             features.push(r.feature);
           }
         } catch (e) {
@@ -1711,12 +1747,13 @@ export function applyFeatureStyle(feature) {
 
   // 文字类
   if (type === 'dxf_text') {
-    const tColor = overrideColor || (lsty.text ? lsty.text.color : (resolved || '#000000'));
+    const isGcdElev = feature.get('isGcdElevation');
+    const tColor = isGcdElev ? (overrideColor || GCD_ELEVATION_COLOR) : (overrideColor || (lsty.text ? lsty.text.color : (resolved || '#000000')));
     const fontSize = feature.get('fontSize') || (lsty.text ? lsty.text.fontSize : 12);
     const t = feature.get('name') || '';
     const haloColor = lsty.text ? (lsty.text.strokeColor || 'white') : 'white';
-    const haloWidth = lsty.text ? (lsty.text.strokeWidth || 2) : 2;
-    const isGcdElev = feature.get('isGcdElevation');
+    // GCD 高程注记用更细光晕(0.9)，与其它文字一致保持细体；编辑重渲染后仍恒定像素不缩放
+    const haloWidth = isGcdElev ? 0.9 : (lsty.text ? (lsty.text.strokeWidth || 2) : 2);
     // GCD 高程注记：数字偏右(offsetX)以免压在小圆点上，保持细体橙红、固定屏幕像素
     const textStyle = buildTextStyle({
       text: t,

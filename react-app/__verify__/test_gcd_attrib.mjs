@@ -38,15 +38,15 @@ export async function runGcdAttribTest() {
     realByValue[v] = f;
     const okType = f.get('type') === 'dxf_text';
     const okLayer = f.get('layer') === 'GCD';
-    const okTag = f.get('attTag') === 'height';
-    const okFromAttrib = f.get('fromAttrib') === true;
+    const okElev = f.get('isGcdElevation') === true;   // 新模型：高程来自圆心Z，标记为 GCD 高程要素
+    const okFromAttrib = f.get('srcSystem') != null;    // 携带源坐标系，便于基准面/坐标系重投影
     const style = f.getStyle();
     const okStyle = style && typeof style.getText === 'function' && !!style.getText();
     const geom = f.getGeometry();
     const okGeom = !!geom && geom.getCoordinates && Array.isArray(geom.getCoordinates());
     const coords = geom ? geom.getCoordinates() : [];
     const okFinite = coords.every(c => typeof c === 'number' && isFinite(c));
-    if (!okType || !okLayer || !okTag || !okFromAttrib || !okStyle || !okGeom || !okFinite) realAllValid = false;
+    if (!okType || !okLayer || !okElev || !okFromAttrib || !okStyle || !okGeom || !okFinite) realAllValid = false;
     if (!okFinite) realGeomFinite = false;
     console.log(`  - 高程="${v}" layer=${f.get('layer')} srcCoords=${JSON.stringify(f.get('srcCoords'))} 有效=${okType && okLayer && okTag && okFromAttrib && okStyle && okGeom && okFinite}`);
   }

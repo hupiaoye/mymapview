@@ -40,6 +40,18 @@ function createWindow() {
     mainWindow.webContents.openDevTools();
   }
 
+  // 生产环境彻底禁用开发者工具：拦截 F12 / Ctrl+Shift+I 快捷键，并强制关闭任何已打开的面板
+  if (process.env.NODE_ENV !== 'development') {
+    mainWindow.webContents.on('before-input-event', (event, input) => {
+      if (input.key === 'F12' || (input.control && input.shift && (input.key === 'I' || input.key === 'i'))) {
+        event.preventDefault();
+      }
+    });
+    mainWindow.webContents.on('devtools-opened', () => {
+      mainWindow.webContents.closeDevTools();
+    });
+  }
+
   // 开发环境加载本地服务器，生产环境加载构建文件
   if (process.env.NODE_ENV === 'development') {
     mainWindow.loadURL('http://localhost:3000');
@@ -47,8 +59,8 @@ function createWindow() {
     // 打包后的路径 - 直接使用app.asar路径
     const indexPath = path.join(app.getAppPath(), 'react-app', 'build', 'index.html');
     console.log('Loading index from:', indexPath);
-    mainWindow.loadFile(indexPath);
-  }
+      mainWindow.loadFile(indexPath);
+    }
 
   // 创建菜单
   const menuTemplate = [
@@ -66,9 +78,7 @@ function createWindow() {
       submenu: [
         { label: '坐标转换', click: () => mainWindow.webContents.send('open-coord-converter') },
         { label: '面积测量', click: () => mainWindow.webContents.send('start-measure-area') },
-        { label: '距离测量', click: () => mainWindow.webContents.send('start-measure-distance') },
-        { type: 'separator' },
-        { label: '开发者工具', accelerator: 'F12', click: () => mainWindow.webContents.toggleDevTools() }
+        { label: '距离测量', click: () => mainWindow.webContents.send('start-measure-distance') }
       ]
     },
     {
@@ -88,13 +98,16 @@ async function importData() {
   const result = await dialog.showOpenDialog(mainWindow, {
     title: '导入地图数据',
     filters: [
-      { name: '支持的格式', extensions: ['kml', 'kmz', 'gpx', 'csv', 'xlsx', 'geojson', 'shp', 'dxf', 'dwg'] },
+      { name: '支持的格式', extensions: ['kml', 'kmz', 'gpx', 'csv', 'xlsx', 'geojson', 'shp', 'dxf', 'dwg', 'ovobj', 'ovkml', 'ovkmz', 'gkzt'] },
       { name: 'KML/KMZ', extensions: ['kml', 'kmz'] },
+      { name: '奥维KML(OVKML)', extensions: ['ovkml', 'ovkmz'] },
       { name: 'GPX', extensions: ['gpx'] },
       { name: 'CSV/Excel', extensions: ['csv', 'xlsx'] },
       { name: 'GeoJSON', extensions: ['geojson'] },
       { name: 'Shapefile', extensions: ['shp'] },
-      { name: 'CAD文件', extensions: ['dxf', 'dwg'] }
+      { name: 'CAD文件', extensions: ['dxf', 'dwg'] },
+      { name: '奥维对象', extensions: ['ovobj'] },
+      { name: '工程分享包(.gkzt)', extensions: ['gkzt'] }
     ],
     properties: ['openFile', 'multiSelections']
   });
@@ -110,16 +123,20 @@ async function importData() {
       }
       const ext = path.extname(filePath).toLowerCase().replace('.', '');
       
-      // DXF/DWG必须作为ArrayBuffer传递，由解析器处理编码
-      const binaryFormats = ['dxf', 'dwg', 'shp', 'kmz'];
-      const textFormats = ['kml', 'gpx', 'csv', 'geojson', 'xlsx'];
-      
+      // DXF/DWG 等二进制格式：直接传递 Buffer（Uint8Array）。
+      // 注意：之前用 Array.from(buffer) 会把整文件展开成「每个字节一个数字」的普通数组，
+      // 例如 50MB 的 DXF 会变成约 5000 万个数字，经 IPC 结构化克隆传给渲染进程时内存暴涨，
+      // 导致大文件导入时渲染进程 OGG/OOM 崩溃。直接传 Buffer(Uint8Array) 只占用一份连续内存，
+      // 经 IPC 克隆效率极高。所有解析器（dxfParser/shapefileParser/kmlParser…）均已支持 Uint8Array。
+      const binaryFormats = ['dxf', 'dwg', 'shp', 'kmz', 'ovobj'];
+      const textFormats = ['kml', 'gpx', 'csv', 'geojson', 'xlsx', 'ovkml', 'ovkmz'];
+
       let content;
       let isBinary;
-      
+
       if (binaryFormats.includes(ext)) {
-        // 二进制格式：传递ArrayBuffer
-        content = Array.from(buffer);
+        // 二进制格式：直接传 Buffer（Uint8Array），避免 Array.from 展开导致大文件崩溃
+        content = buffer;
         isBinary = true;
       } else if (textFormats.includes(ext)) {
         // 文本格式：传递字符串

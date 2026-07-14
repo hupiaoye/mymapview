@@ -38,12 +38,12 @@ function CoordSystemPicker({ onSelect, onClose, title = '选择坐标系' }) {
   // 过滤坐标系
   const filteredCategories = useMemo(() => {
     if (!searchQuery) return categories;
-    
+
     const query = searchQuery.toLowerCase();
     const result = {};
-    
+
     Object.entries(categories).forEach(([key, category]) => {
-      const filtered = category.items.filter(sys => 
+      const filtered = category.items.filter(sys =>
         sys.name.toLowerCase().includes(query) ||
         sys.nameCN.toLowerCase().includes(query) ||
         sys.description.toLowerCase().includes(query)
@@ -52,7 +52,7 @@ function CoordSystemPicker({ onSelect, onClose, title = '选择坐标系' }) {
         result[key] = { ...category, items: filtered };
       }
     });
-    
+
     return result;
   }, [categories, searchQuery]);
 
